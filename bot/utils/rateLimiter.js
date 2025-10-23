@@ -6,7 +6,7 @@ export function initRateLimiter(client) {
     if (!interaction.isChatInputCommand()) return;
 
     const now = Date.now();
-    const cooldownAmount = 3000; // 3 seconds per command
+    const cooldownAmount = 3000;
 
     if (!commandCooldowns.has(interaction.commandName)) {
       commandCooldowns.set(interaction.commandName, new Map());
