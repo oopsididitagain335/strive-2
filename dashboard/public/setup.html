@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Ticket Panel Setup</title>
+  <meta charset="utf-8">
+  <style>body{font-family:sans-serif;background:#1e1e1e;color:white;text-align:center;padding:40px;}</style>
+</head>
+<body>
+  <h2>🎫 Ticket Panel Builder</h2>
+  <p>Customize your support ticket panel below.</p>
+  <form id="panelForm">
+    <input type="hidden" id="token" value="">
+    <p><input type="text" id="title" placeholder="Panel Title" value="Support Tickets" style="width:300px;padding:8px;"></p>
+    <p><textarea id="description" placeholder="Description" style="width:300px;height:80px;">Click a button to open a ticket.</textarea></p>
+    <p><input type="color" id="color" value="#00ff00"></p>
+    <button type="submit">Deploy Panel</button>
+  </form>
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    document.getElementById('token').value = urlParams.get('token');
+
+    document.getElementById('panelForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const res = await fetch('/api/ticket/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: document.getElementById('token').value,
+          title: document.getElementById('title').value,
+          description: document.getElementById('description').value,
+          color: document.getElementById('color').value,
+          buttons: [{ label: 'General Support', style: 'primary' }]
+        })
+      });
+      const data = await res.json();
+      alert(data.success ? '✅ Panel deployed!' : '❌ Failed');
+    });
+  </script>
+</body>
+</html>
