@@ -5,8 +5,8 @@ import { logger } from '../../utils/logger.js';
 
 export const data = new SlashCommandBuilder()
   .setName('dice')
-  .setDescription('Roll a 6-sided die and bet')
-  .addIntegerOption(o => o.setName('bet').setDescription('Amount to bet (min: 10)').setMinValue(10).setRequired(true));
+  .setDescription('Roll a die and bet')
+  .addIntegerOption(o => o.setName('bet').setDescription('Bet amount (min: 10)').setMinValue(10).setRequired(true));
 
 export async function execute(interaction) {
   const bet = interaction.options.getInteger('bet');
@@ -16,8 +16,8 @@ export async function execute(interaction) {
     return interaction.reply({ content: '❌ Not enough coins!', ephemeral: true });
   }
 
-  const roll = Math.floor(Math.random() * 6) + 1; // 1–6
-  const win = roll >= 5; // 5 or 6 = win (33% chance)
+  const roll = Math.floor(Math.random() * 6) + 1;
+  const win = roll >= 5;
   const payout = win ? bet * 2 : 0;
 
   await UserEconomy.updateOne(
@@ -33,7 +33,5 @@ export async function execute(interaction) {
     win
   });
 
-  await interaction.reply({
-    content: `🎲 You rolled a **${roll}**!\n${win ? `🎉 You won **${payout.toLocaleString()}** coins!` : '💔 You lost.'}`
-  });
+  await interaction.reply(`🎲 You rolled **${roll}**! ${win ? '✅ You won!' : '❌ You lost.'}`);
 }
