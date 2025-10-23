@@ -2,7 +2,7 @@
 import winston from 'winston';
 import 'winston-daily-rotate-file';
 
-const { combine, timestamp, printf, colorize, json } = winston.format;
+const { combine, timestamp, printf, colorize } = winston.format;
 
 const logFormat = printf(({ level, message, timestamp, ...meta }) => {
   let msg = `${timestamp} [${level.toUpperCase()}]: ${message}`;
@@ -16,22 +16,16 @@ const logger = winston.createLogger({
   level: 'debug',
   format: combine(
     timestamp(),
-    process.env.NODE_ENV === 'production' ? json() : colorize(),
+    process.env.NODE_ENV === 'production' ? printf(({ level, message, timestamp }) => 
+      `${timestamp} [${level.toUpperCase()}]: ${message}`
+    ) : colorize(),
     logFormat
   ),
   transports: [
-    new winston.transports.Console(),
-    new winston.transports.DailyRotateFile({
-      filename: 'logs/strive-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      zippedArchive: true,
-      maxSize: '20m',
-      maxFiles: '14d'
-    })
+    new winston.transports.Console()
   ]
 });
 
-// Custom audit & security levels
 logger.audit = (message, meta = {}) => logger.info(message, { ...meta, logType: 'AUDIT' });
 logger.security = (message, meta = {}) => logger.warn(message, { ...meta, logType: 'SECURITY' });
 
