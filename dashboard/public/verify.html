@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Verifying...</title>
+  <style>
+    body { font-family: sans-serif; background: #1e1e1e; color: white; text-align: center; padding: 60px; }
+    .success { color: #00ff00; }
+    .error { color: #ff0000; }
+  </style>
+</head>
+<body>
+  <h2>🔐 Verifying your account...</h2>
+  <p>Please wait.</p>
+
+  <script>
+    const token = new URLSearchParams(window.location.search).get('token');
+    if (!token) {
+      document.body.innerHTML = '<h2 class="error">❌ No verification token.</h2>';
+    } else {
+      fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      })
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          document.body.innerHTML = '<h2 class="success">✅ Verified!</h2><p>You may close this window.</p>';
+        } else {
+          document.body.innerHTML = `<h2 class="error">❌ ${d.error || 'Verification failed.'}</h2>`;
+        }
+      })
+      .catch(() => {
+        document.body.innerHTML = '<h2 class="error">❌ Network error.</h2>';
+      });
+    }
+  </script>
+</body>
+</html>
