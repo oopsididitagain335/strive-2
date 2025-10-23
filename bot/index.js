@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
 
-import { logger } from './utils/logger.js';
+// Import logger from ROOT /utils
+import { logger } from '../utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
 import { initSecurity } from './security/index.js';
