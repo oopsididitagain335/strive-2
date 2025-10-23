@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
 
-// --- Bot-local utils (inside /bot/utils) ---
 import { logger } from './utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
@@ -16,7 +15,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 
-// --- Validate env ---
 const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'ADMIN_ID'];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -25,7 +23,6 @@ for (const key of requiredEnv) {
   }
 }
 
-// --- Client setup ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -47,7 +44,6 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// --- Error handling ---
 process.on('unhandledRejection', (reason) => {
   logger.warn('⚠️ Unhandled Rejection:', reason?.message || String(reason));
 });
@@ -63,11 +59,13 @@ process.on('uncaughtException', (err) => {
   }
 });
 
-// --- DB ---
-await mongoose.connect(process.env.MONGO_URI);
+await mongoose.connect(process.env.MONGO_URI, {
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+});
 logger.info('✅ Connected to MongoDB');
 
-// --- Optional Redis ---
 let redisClient = null;
 if (process.env.REDIS_URL) {
   const Redis = (await import('ioredis')).default;
@@ -82,7 +80,6 @@ if (process.env.REDIS_URL) {
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
-// --- Recursive loader ---
 const loadDirectory = async (dirPath, initFn = null) => {
   try {
     const files = await fs.readdir(dirPath, { withFileTypes: true });
@@ -101,7 +98,6 @@ const loadDirectory = async (dirPath, initFn = null) => {
   }
 };
 
-// --- Load commands (from root /commands) ---
 await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   try {
     const command = await import(`file://${filePath}`);
@@ -112,11 +108,14 @@ await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
       logger.warn(`Skipped invalid command: ${filePath}`);
     }
   } catch (err) {
-    logger.error(`Failed to load command ${filePath}:`, err.message);
+    logger.error(`Failed to load command ${filePath}:`, {
+      message: err.message,
+      stack: err.stack,
+      code: err.code
+    });
   }
 });
 
-// --- Load events (from /bot/events) ---
 await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   try {
     const event = await import(`file://${filePath}`);
@@ -131,18 +130,20 @@ await loadDirectory(join(__dirname, 'events'), async (filePath) => {
       logger.warn(`Skipped invalid event: ${filePath}`);
     }
   } catch (err) {
-    logger.error(`Failed to load event ${filePath}:`, err.message);
+    logger.error(`Failed to load event ${filePath}:`, {
+      message: err.message,
+      stack: err.stack,
+      code: err.code
+    });
   }
 });
 
-// --- Init subsystems (all inside /bot) ---
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
 
 logger.info(`✅ Loaded ${client.commands.size} commands and all events`);
 
-// --- Shutdown ---
 const shutdown = async (signal) => {
   logger.warn(`Received ${signal} — shutting down gracefully...`);
   try {
@@ -159,7 +160,6 @@ const shutdown = async (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-// --- Login ---
 try {
   await client.login(process.env.DISCORD_TOKEN);
   logger.info(`✅ Strive V2 online as ${client.user.tag}`);
