@@ -5,9 +5,8 @@ import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
-import http from 'node:http';
 
-// Import logger from ROOT /utils
+// Shared logger from root /utils
 import { logger } from '../utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
@@ -17,6 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 
+// Validate critical env vars
 const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'ADMIN_ID'];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -25,6 +25,7 @@ for (const key of requiredEnv) {
   }
 }
 
+// Discord Client
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -46,6 +47,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// Global error handling (stay online!)
 process.on('unhandledRejection', (reason) => {
   logger.warn('⚠️ Unhandled Rejection:', reason?.message || String(reason));
 });
@@ -61,6 +63,7 @@ process.on('uncaughtException', (err) => {
   }
 });
 
+// MongoDB
 await mongoose.connect(process.env.MONGO_URI, {
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 5000,
@@ -68,6 +71,7 @@ await mongoose.connect(process.env.MONGO_URI, {
 });
 logger.info('✅ Connected to MongoDB');
 
+// Optional Redis
 let redisClient = null;
 if (process.env.REDIS_URL) {
   const Redis = (await import('ioredis')).default;
@@ -82,6 +86,7 @@ if (process.env.REDIS_URL) {
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
+// Recursive loader
 const loadDirectory = async (dirPath, initFn = null) => {
   try {
     const files = await fs.readdir(dirPath, { withFileTypes: true });
@@ -100,6 +105,7 @@ const loadDirectory = async (dirPath, initFn = null) => {
   }
 };
 
+// Load commands (from root /commands)
 await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   try {
     const command = await import(`file://${filePath}`);
@@ -118,6 +124,7 @@ await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   }
 });
 
+// Load events (from /bot/events)
 await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   try {
     const event = await import(`file://${filePath}`);
@@ -140,31 +147,16 @@ await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   }
 });
 
+// Initialize subsystems
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
 
 logger.info(`✅ Loaded ${client.commands.size} commands and all events`);
 
-// ✅ DUMMY HTTP SERVER TO SATISFY RENDER
-const PORT = process.env.PORT || 10000;
-const server = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'OK', bot: 'online' }));
-  } else {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Strive Bot Worker — No HTTP interface.');
-  }
-});
-
-server.listen(PORT, '0.0.0.0', () => {
-  logger.info(`🌐 Dummy HTTP server listening on port ${PORT}`);
-});
-
+// Graceful shutdown
 const shutdown = async (signal) => {
   logger.warn(`Received ${signal} — shutting down gracefully...`);
-  server.close();
   try {
     await client.destroy();
     if (redisClient) await redisClient.quit();
@@ -179,6 +171,7 @@ const shutdown = async (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
+// Login
 try {
   await client.login(process.env.DISCORD_TOKEN);
   logger.info(`✅ Strive V2 online as ${client.user.tag}`);
