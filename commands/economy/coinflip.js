@@ -1,3 +1,4 @@
+// /commands/economy/coinflip.js
 import { SlashCommandBuilder } from 'discord.js';
 import UserEconomy from '../../models/UserEconomy.js';
 import { logger } from '../../utils/logger.js';
@@ -22,6 +23,7 @@ export async function execute(interaction) {
 
   const result = Math.random() > 0.5 ? 'heads' : 'tails';
   const win = choice === result;
+  const payout = win ? bet : 0;
 
   await UserEconomy.updateOne(
     { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -38,6 +40,6 @@ export async function execute(interaction) {
   });
 
   await interaction.reply({
-    content: `🪙 **Coinflip**\nResult: **${result.toUpperCase()}**\nYou chose: **${choice.toUpperCase()}**\n${win ? '✅ You won!' : '❌ You lost.'}`
+    content: `🪙 Result: **${result.toUpperCase()}**\nYou chose: **${choice.toUpperCase()}**\n${win ? '✅ You won!' : '❌ You lost.'}`
   });
 }
