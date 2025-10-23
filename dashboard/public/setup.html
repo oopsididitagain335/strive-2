@@ -1,39 +1,49 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Ticket Panel Setup</title>
-  <meta charset="utf-8">
-  <style>body{font-family:sans-serif;background:#1e1e1e;color:white;text-align:center;padding:40px;}</style>
+  <style>
+    body { font-family: sans-serif; background: #1e1e1e; color: white; text-align: center; padding: 40px; }
+    input, textarea, button { padding: 8px; margin: 8px; width: 300px; border-radius: 4px; border: 1px solid #444; background: #2b2b2b; color: white; }
+    button { background: #5865F2; cursor: pointer; width: auto; }
+  </style>
 </head>
 <body>
   <h2>🎫 Ticket Panel Builder</h2>
-  <p>Customize your support ticket panel below.</p>
   <form id="panelForm">
     <input type="hidden" id="token" value="">
-    <p><input type="text" id="title" placeholder="Panel Title" value="Support Tickets" style="width:300px;padding:8px;"></p>
-    <p><textarea id="description" placeholder="Description" style="width:300px;height:80px;">Click a button to open a ticket.</textarea></p>
-    <p><input type="color" id="color" value="#00ff00"></p>
+    <input type="text" id="title" placeholder="Panel Title" value="Support Tickets">
+    <textarea id="description" placeholder="Description">Click a button below to open a ticket.</textarea>
+    <input type="color" id="color" value="#00ff00">
     <button type="submit">Deploy Panel</button>
   </form>
+
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     document.getElementById('token').value = urlParams.get('token');
 
-    document.getElementById('panelForm').addEventListener('submit', async e => {
+    document.getElementById('panelForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const token = document.getElementById('token').value;
+      if (!token) return alert('No token');
+
+      const payload = {
+        token,
+        title: document.getElementById('title').value,
+        description: document.getElementById('description').value,
+        color: document.getElementById('color').value,
+        buttons: [{ label: 'General Support', style: 'primary' }]
+      };
+
       const res = await fetch('/api/ticket/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: document.getElementById('token').value,
-          title: document.getElementById('title').value,
-          description: document.getElementById('description').value,
-          color: document.getElementById('color').value,
-          buttons: [{ label: 'General Support', style: 'primary' }]
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
-      alert(data.success ? '✅ Panel deployed!' : '❌ Failed');
+      alert(data.success ? '✅ Panel deployed!' : '❌ Failed to deploy.');
     });
   </script>
 </body>
