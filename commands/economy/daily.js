@@ -1,3 +1,4 @@
+// /commands/economy/daily.js
 import { SlashCommandBuilder } from 'discord.js';
 import UserEconomy from '../../models/UserEconomy.js';
 import { logger } from '../../utils/logger.js';
@@ -15,27 +16,23 @@ export async function execute(interaction) {
   );
 
   const lastDaily = user.lastDaily || 0;
-  const cooldown = 24 * 60 * 60 * 1000; // 24 hours
+  const cooldown = 24 * 60 * 60 * 1000;
 
   if (now - lastDaily < cooldown) {
-    const remaining = Math.ceil((cooldown - (now - lastDaily)) / (60 * 1000));
-    return interaction.reply({
-      content: `⏳ You already claimed your daily! Come back in **${remaining} minutes**.`,
-      ephemeral: true
-    });
+    const remaining = Math.ceil((cooldown - (now - lastDaily)) / 60000);
+    return interaction.reply({ content: `⏳ Come back in **${remaining} minutes**.`, ephemeral: true });
   }
 
-  const amount = 500;
   await UserEconomy.updateOne(
     { userId: interaction.user.id, guildId: interaction.guild.id },
-    { $inc: { balance: amount }, $set: { lastDaily: now } }
+    { $inc: { balance: 500 }, $set: { lastDaily: now } }
   );
 
   logger.audit('ECONOMY_DAILY_CLAIMED', {
     guildId: interaction.guild.id,
     userId: interaction.user.id,
-    amount
+    amount: 500
   });
 
-  await interaction.reply(`🎁 You claimed your daily **${amount.toLocaleString()}** coins!`);
+  await interaction.reply('🎁 You claimed **500** daily coins!');
 }
