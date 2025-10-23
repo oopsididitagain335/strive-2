@@ -6,51 +6,174 @@ import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import 'dotenv/config';
+import fetch from 'node-fetch';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const app = express();
 
-// Security & Middleware
+// Security & Static Files
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.static(join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session (shared with bot via MongoDB)
+// Session Store (shared with bot)
 app.use(session({
-  secret: process.env.SESSION_KEY || 'strive_secure_2025',
+  secret: process.env.SESSION_KEY || 'strive_secure_session_2025',
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGO_URI,
-    collection: 'sessions'
-  }),
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collection: 'sessions' }),
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 14 * 24 * 60 * 60 * 1000 // 14 days
+    maxAge: 14 * 24 * 60 * 60 * 1000
   }
 }));
 
-// API Routes
-import './api/user.js';
-import './api/servers.js';
-import './api/ticket.js';
-import './api/subscription.js';
-
-// Mount API
-app.use('/api', (req, res, next) => {
+// === API: User ===
+app.get('/api/user', (req, res) => {
   if (!req.session.discordUser) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  next();
-}, (req, res, next) => {
-  // Placeholder — real routes are in /api/*.js via app.use in each
-  next();
+  const user = req.session.discordUser;
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      discriminator: user.discriminator,
+      avatar: user.avatar
+        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=128`
+        : null
+    }
+  });
 });
 
-// OAuth2 Routes
+// === API: Servers ===
+app.get('/api/servers', (req, res) => {
+  if (!req.session.discordUser || !req.session.userGuilds) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // Filter guilds where user has ADMIN
+  const manageable = req.session.userGuilds
+    .filter(guild => (BigInt(guild.permissions) & BigInt(8)) !== 0n)
+    .map(guild => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon
+        ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64`
+        : null
+    }));
+
+  res.json({ servers: manageable });
+});
+
+// === API: Ticket Deploy ===
+app.post('/api/ticket/deploy', async (req, res) => {
+  const { token, title, description, color, buttons } = req.body;
+
+  // In production: forward to bot via internal HTTP or Redis
+  // For now: log and simulate success
+  console.log('TICKET DEPLOY REQUEST:', { token, title });
+
+  // TODO: Integrate with bot internal API
+  res.json({ success: true });
+});
+
+// === API: Create Stripe Checkout ===
+app.post('/api/subscription/create-checkout', async (req, res) => {
+  if (!req.session.discordUser) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { plan, guildId } = req.body;
+  const plans = {
+    basic_monthly: 500,
+    basic_yearly: 6000,
+    premium_monthly: 1200,
+    premium_yearly: 14400,
+    ultra_monthly: 2900,
+    ultra_yearly: 34800
+  };
+
+  if (!plans[plan]) {
+    return res.status(400).json({ error: 'Invalid plan' });
+  }
+
+  const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+  try {
+    const productRes = await fetch('https://api.stripe.com/v1/products', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.STRIPE_SK}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        name: `Strive ${plan.replace('_', ' ')}`
+      })
+    });
+    const product = await productRes.json();
+
+    const priceRes = await fetch('https://api.stripe.com/v1/prices', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.STRIPE_SK}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        product: product.id,
+        unit_amount: plans[plan],
+        currency: 'gbp',
+        recurring: `{"interval":"${plan.includes('yearly') ? 'year' : 'month'}"}`
+      })
+    });
+    const price = await priceRes.json();
+
+    const sessionRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.STRIPE_SK}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        mode: 'subscription',
+        payment_method_types: 'card',
+        line_items: JSON.stringify([{ price: price.id, quantity: 1 }]),
+        success_url: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/premium`,
+        client_reference_id: req.session.discordUser.id,
+        metadata: JSON.stringify({
+          discordUserId: req.session.discordUser.id,
+          discordUsername: req.session.discordUser.username,
+          plan,
+          guildId
+        })
+      })
+    });
+    const session = await sessionRes.json();
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('Stripe error:', err.message);
+    res.status(500).json({ error: 'Failed to create checkout' });
+  }
+});
+
+// === API: Verify ===
+app.post('/api/verify', async (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ success: false, error: 'No token' });
+  }
+
+  // In real app: validate token against DB
+  // For demo: simulate success
+  console.log('VERIFY REQUEST:', token);
+  res.json({ success: true });
+});
+
+// === OAuth2 Routes ===
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
   const state = Buffer.from(redirect).toString('base64');
@@ -79,14 +202,14 @@ app.get('/auth/callback', async (req, res) => {
       }),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
-    const data = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(data.error);
+    const tokens = await tokenRes.json();
+    if (!tokenRes.ok) throw new Error(tokens.error);
 
     const userRes = await fetch('https://discord.com/api/users/@me', {
-      headers: { Authorization: `Bearer ${data.access_token}` }
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
     });
     const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
-      headers: { Authorization: `Bearer ${data.access_token}` }
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
     });
 
     req.session.discordUser = await userRes.json();
@@ -104,13 +227,15 @@ app.get('/auth/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
 
-// Public Pages
+// === Public Routes ===
 app.get('/', (req, res) => res.sendFile(join(__dirname, 'public', 'index.html')));
 app.get('/health', (req, res) => res.json({ status: 'OK', time: new Date().toISOString() }));
 
-// Protected Pages
+// === Protected Routes ===
 const ensureAuth = (req, res, next) => {
-  if (!req.session.discordUser) return res.redirect('/login?redirect=' + encodeURIComponent(req.originalUrl));
+  if (!req.session.discordUser) {
+    return res.redirect('/login?redirect=' + encodeURIComponent(req.originalUrl));
+  }
   next();
 };
 
@@ -120,7 +245,7 @@ app.get('/setup.html', (req, res) => res.sendFile(join(__dirname, 'public', 'set
 app.get('/verify', (req, res) => res.sendFile(join(__dirname, 'public', 'verify.html')));
 app.get('/success', (req, res) => res.sendFile(join(__dirname, 'public', 'success.html')));
 
-// Start
+// === Start Server ===
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Strive Dashboard running on port ${PORT}`);
