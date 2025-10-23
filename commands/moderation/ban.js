@@ -1,3 +1,4 @@
+// /commands/moderation/ban.js
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 
@@ -6,35 +7,23 @@ export const data = new SlashCommandBuilder()
   .setDescription('Ban a user')
   .addUserOption(o => o.setName('user').setDescription('User to ban').setRequired(true))
   .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false))
-  .addIntegerOption(o => o.setName('delete_days').setDescription('Delete messages from last N days (0-7)').setMinValue(0).setMaxValue(7))
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 
 export async function execute(interaction) {
-  const targetUser = interaction.options.getUser('user');
-  const reason = interaction.options.getString('reason') || 'No reason provided';
-  const deleteDays = interaction.options.getInteger('delete_days') || 0;
-
-  if (targetUser.id === interaction.guild.ownerId) {
-    return interaction.reply({ content: '❌ You cannot ban the server owner.', ephemeral: true });
-  }
+  const user = interaction.options.getUser('user');
+  const reason = interaction.options.getString('reason') || 'No reason';
 
   try {
-    await interaction.guild.bans.create(targetUser.id, {
-      reason,
-      deleteMessageSeconds: deleteDays * 86400,
-    });
-
+    await interaction.guild.bans.create(user.id, { reason });
     logger.audit('MODERATION_BAN', {
       guildId: interaction.guild.id,
-      moderatorId: interaction.user.id,
-      targetId: targetUser.id,
-      reason,
-      deleteDays,
+      moderator: interaction.user.id,
+      target: user.id,
+      reason
     });
-
-    await interaction.reply(`✅ Banned ${targetUser.tag} | ${reason}`);
+    await interaction.reply(`✅ Banned ${user.tag}`);
   } catch (err) {
-    logger.error('BAN_FAILED', { guildId: interaction.guild.id, error: err.message });
-    await interaction.reply({ content: '❌ Failed to ban user. Check permissions or user status.', ephemeral: true });
+    logger.error('BAN_FAILED', { error: err.message });
+    await interaction.reply({ content: '❌ Failed to ban user.', ephemeral: true });
   }
 }
