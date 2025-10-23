@@ -21,8 +21,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 
-// Validate critical environment variables
-const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'ADMIN_ID'];
+// Validate env
+const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'ADMIN_ID', 'SESSION_KEY'];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
     logger.fatal(`❌ Missing required environment variable: ${key}`);
@@ -30,7 +30,7 @@ for (const key of requiredEnv) {
   }
 }
 
-// === DISCORD BOT SETUP ===
+// === DISCORD BOT ===
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -52,7 +52,6 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// Global error handling (stay online!)
 process.on('unhandledRejection', (reason) => {
   logger.warn('⚠️ Unhandled Rejection:', reason?.message || String(reason));
 });
@@ -68,7 +67,6 @@ process.on('uncaughtException', (err) => {
   }
 });
 
-// MongoDB connection
 await mongoose.connect(process.env.MONGO_URI, {
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 5000,
@@ -76,7 +74,6 @@ await mongoose.connect(process.env.MONGO_URI, {
 });
 logger.info('✅ Connected to MongoDB');
 
-// Optional Redis
 let redisClient = null;
 if (process.env.REDIS_URL) {
   const Redis = (await import('ioredis')).default;
@@ -91,7 +88,6 @@ if (process.env.REDIS_URL) {
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
-// Recursive loader for commands/events
 const loadDirectory = async (dirPath, initFn = null) => {
   try {
     const files = await fs.readdir(dirPath, { withFileTypes: true });
@@ -110,7 +106,6 @@ const loadDirectory = async (dirPath, initFn = null) => {
   }
 };
 
-// Load commands from root /commands
 await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   try {
     const command = await import(`file://${filePath}`);
@@ -129,7 +124,6 @@ await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   }
 });
 
-// Load events from /bot/events
 await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   try {
     const event = await import(`file://${filePath}`);
@@ -152,52 +146,39 @@ await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   }
 });
 
-// Initialize bot subsystems
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
 
 logger.info(`✅ Loaded ${client.commands.size} commands`);
 
-// === DASHBOARD HTTP SERVER (Render Web Service) ===
+// === DASHBOARD HTTP SERVER ===
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Security & static files
+// Security
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "https://cdn.discordapp.com", "https://top.gg", "data:"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"]
-    }
-  }
+  contentSecurityPolicy: false, // disable for simplicity; enable in prod with proper directives
 }));
 
-app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public'), {
-  maxAge: '1d'
-}));
+// Static files
+app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public')));
 
+// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Session (shared with bot via MongoDB)
+// Session (CRITICAL FIX: sameSite: 'lax', secure only in prod)
 app.use(session({
-  secret: process.env.SESSION_KEY || 'strive_secure_session_2025',
+  secret: process.env.SESSION_KEY, // MUST be set in Render
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGO_URI,
-    collection: 'sessions',
-    ttl: 14 * 24 * 60 * 60
-  }),
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collection: 'sessions' }),
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production', // true only on HTTPS (Render sets this)
     httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 14 * 24 * 60 * 60 * 1000
+    sameSite: 'lax', // ✅ Allows OAuth redirect from Discord
+    maxAge: 14 * 24 * 60 * 60 * 1000 // 14 days
   }
 }));
 
@@ -209,10 +190,11 @@ function ensureAuth(req, res, next) {
   next();
 }
 
-// OAuth2 routes
+// OAuth2
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
-  const state = Buffer.from(redirect).toString('base64');
+  // Use simple URL encoding (not base64) to avoid length issues
+  const state = encodeURIComponent(redirect);
   const url = new URL('https://discord.com/api/oauth2/authorize');
   url.searchParams.set('client_id', process.env.CLIENT_ID);
   url.searchParams.set('redirect_uri', process.env.REDIRECT_URI);
@@ -224,9 +206,10 @@ app.get('/login', (req, res) => {
 
 app.get('/auth/callback', async (req, res) => {
   const { code, state } = req.query;
-  if (!code) return res.status(400).send('❌ No authorization code provided.');
+  if (!code) return res.status(400).send('❌ No code provided.');
 
   try {
+    // Exchange code
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -240,21 +223,31 @@ app.get('/auth/callback', async (req, res) => {
     });
 
     const tokens = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(tokens.error_description || tokens.error);
+    if (!tokenRes.ok) throw new Error(tokens.error || 'Token exchange failed');
 
-    const [userRes, guildsRes] = await Promise.all([
-      fetch('https://discord.com/api/users/@me', {
-        headers: { Authorization: `Bearer ${tokens.access_token}` }
-      }),
-      fetch('https://discord.com/api/users/@me/guilds', {
-        headers: { Authorization: `Bearer ${tokens.access_token}` }
-      })
-    ]);
+    // Fetch user + guilds
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
 
     req.session.discordUser = await userRes.json();
     req.session.userGuilds = await guildsRes.json();
 
-    const redirect = state ? Buffer.from(state, 'base64').toString() : '/dashboard';
+    // Decode redirect safely
+    let redirect = '/dashboard';
+    if (state) {
+      try {
+        redirect = decodeURIComponent(state);
+        // Validate redirect is relative
+        if (!redirect.startsWith('/')) redirect = '/dashboard';
+      } catch (e) {
+        redirect = '/dashboard';
+      }
+    }
+
     res.redirect(redirect);
   } catch (err) {
     console.error('OAuth Error:', err.message);
@@ -266,7 +259,7 @@ app.get('/auth/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
 
-// API routes
+// API
 app.get('/api/user', ensureAuth, (req, res) => {
   const { id, username, avatar } = req.session.discordUser;
   res.json({
@@ -290,11 +283,11 @@ app.get('/api/servers', ensureAuth, (req, res) => {
 });
 
 app.post('/api/ticket/deploy', ensureAuth, (req, res) => {
-  console.log('TICKET DEPLOY REQUEST:', req.body);
+  console.log('TICKET DEPLOY:', req.body);
   res.json({ success: true });
 });
 
-// Public routes
+// Routes
 app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
 app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
 app.get('/premium', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'premium.html')));
@@ -302,7 +295,7 @@ app.get('/setup.html', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard'
 app.get('/verify', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'verify.html')));
 app.get('/success', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'success.html')));
 
-// Health check (required by Render)
+// Health check
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
@@ -313,10 +306,10 @@ app.get('/health', (req, res) => {
 
 // Start HTTP server on 0.0.0.0:PORT
 app.listen(PORT, '0.0.0.0', () => {
-  logger.info(`🌐 Dashboard HTTP server listening on http://0.0.0.0:${PORT}`);
+  logger.info(`🌐 HTTP server listening on http://0.0.0.0:${PORT}`);
 });
 
-// === START DISCORD BOT ===
+// === START BOT ===
 try {
   await client.login(process.env.DISCORD_TOKEN);
   logger.info(`✅ Strive V2 online as ${client.user.tag}`);
@@ -328,7 +321,7 @@ try {
 
 // Graceful shutdown
 const shutdown = async (signal) => {
-  logger.warn(`Received ${signal} — shutting down gracefully...`);
+  logger.warn(`Received ${signal} — shutting down...`);
   try {
     await client.destroy();
     if (redisClient) await redisClient.quit();
