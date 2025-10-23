@@ -9,14 +9,24 @@ export const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
 export async function execute(interaction) {
-  const user = interaction.options.getUser('user');
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  const target = interaction.options.getUser('user');
   const reason = interaction.options.getString('reason');
 
-  if (!member) return interaction.reply({ content: '❌ User not in server.', ephemeral: true });
+  if (target.id === interaction.user.id) {
+    return interaction.reply({ content: '❌ You cannot warn yourself.', ephemeral: true });
+  }
 
-  // Log to DB or channel (simplified)
-  logger.audit('MOD_WARN', { guildId: interaction.guild.id, target: user.id, moderator: interaction.user.id, reason });
+  if (target.bot) {
+    return interaction.reply({ content: '❌ You cannot warn bots.', ephemeral: true });
+  }
 
-  await interaction.reply(`✅ ${user} has been warned for: ${reason}`);
+  // Log to audit trail
+  logger.audit('MODERATION_WARN', {
+    guildId: interaction.guild.id,
+    moderatorId: interaction.user.id,
+    targetId: target.id,
+    reason,
+  });
+
+  await interaction.reply(`✅ ${target} has been warned for: **${reason}**`);
 }
