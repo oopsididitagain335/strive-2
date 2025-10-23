@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 
 // Import logger from ROOT /utils
 import { logger } from '../utils/logger.js';
@@ -145,8 +146,25 @@ initSecurity(client);
 
 logger.info(`✅ Loaded ${client.commands.size} commands and all events`);
 
+// ✅ DUMMY HTTP SERVER TO SATISFY RENDER
+const PORT = process.env.PORT || 10000;
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'OK', bot: 'online' }));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Strive Bot Worker — No HTTP interface.');
+  }
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  logger.info(`🌐 Dummy HTTP server listening on port ${PORT}`);
+});
+
 const shutdown = async (signal) => {
   logger.warn(`Received ${signal} — shutting down gracefully...`);
+  server.close();
   try {
     await client.destroy();
     if (redisClient) await redisClient.quit();
