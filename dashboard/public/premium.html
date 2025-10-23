@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Premium Plans</title>
+  <style>
+    body { font-family: sans-serif; background: #1e1e1e; color: white; text-align: center; padding: 40px; }
+    .plan { display: inline-block; background: #2b2b2b; padding: 20px; margin: 10px; border-radius: 8px; width: 200px; }
+    button { padding: 10px 20px; background: #5865F2; color: white; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>💎 Strive Premium</h2>
+  <div class="plan">
+    <h3>Basic</h3>
+    <p>£5 / month</p>
+    <button onclick="checkout('basic_monthly')">Subscribe</button>
+  </div>
+  <div class="plan">
+    <h3>Professional</h3>
+    <p>£12 / month</p>
+    <button onclick="checkout('premium_monthly')">Subscribe</button>
+  </div>
+  <div class="plan">
+    <h3>Business</h3>
+    <p>£29 / month</p>
+    <button onclick="checkout('ultra_monthly')">Subscribe</button>
+  </div>
+
+  <script>
+    async function checkout(plan) {
+      const res = await fetch('/api/subscription/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan, guildId: 'GUILD_ID' }) // TODO: get from selection
+      });
+      const data = await res.json();
+      if (data.url) window.location = data.url;
+      else alert('Failed to start checkout');
+    }
+  </script>
+</body>
+</html>
