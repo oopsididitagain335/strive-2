@@ -33,7 +33,7 @@
       const res = await fetch('/api/subscription/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, guildId: 'GUILD_ID' }) // TODO: get from selection
+        body: JSON.stringify({ plan, guildId: 'GUILD_ID' })
       });
       const data = await res.json();
       if (data.url) window.location = data.url;
