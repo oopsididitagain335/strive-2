@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
 
-// --- Utils & Security (per your structure) ---
+// --- Utils & Security ---
 import { logger } from './utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
 import { initSecurity } from './security/index.js';
-import { initTickets } from './tickets/index.js';
+// ❌ Removed: import { initTickets } from './tickets/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,7 +46,6 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-client.cooldowns = new Collection();
 
 // --- Global Error Handling (Stay Online!) ---
 process.on('unhandledRejection', (reason) => {
@@ -58,18 +57,13 @@ process.on('uncaughtException', (err) => {
     message: err.message,
     stack: err.stack?.split('\n').slice(0, 3).join('\n'),
   });
-  // Only exit on auth failure
   if (err.message?.includes('TOKEN_INVALID') || err.message?.includes('401')) {
     logger.fatal('Bot token invalid — shutting down.');
     process.exit(1);
   }
-  // Otherwise: recover and stay online
 });
 
-// --- Database Connections ---
-let redisClient = null;
-
-// MongoDB
+// --- MongoDB Connection ---
 await mongoose.connect(process.env.MONGO_URI, {
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 5000,
@@ -77,33 +71,31 @@ await mongoose.connect(process.env.MONGO_URI, {
 });
 logger.info('✅ Connected to MongoDB');
 
-// Optional Redis (for rate limiting, caching)
+// --- Optional Redis ---
+let redisClient = null;
 if (process.env.REDIS_URL) {
-  const Redis = await import('ioredis').then(m => m.default);
+  const Redis = (await import('ioredis')).default;
   redisClient = new Redis(process.env.REDIS_URL, {
     retryStrategy: (times) => Math.min(times * 50, 2000),
   });
   redisClient.on('error', (err) => logger.warn('Redis error:', err.message));
   client.redis = redisClient;
-  logger.info('✅ Redis connected (optional)');
+  logger.info('✅ Redis connected');
 } else {
   client.redis = null;
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
-// --- Auto-Import ALL Modules (Recursive) ---
-
+// --- Recursive Loader ---
 const loadDirectory = async (dirPath, initFn = null) => {
   try {
     const files = await fs.readdir(dirPath, { withFileTypes: true });
     for (const dirent of files) {
       const fullPath = join(dirPath, dirent.name);
       if (dirent.isDirectory()) {
-        await loadDirectory(fullPath, initFn); // recurse
+        await loadDirectory(fullPath, initFn);
       } else if (dirent.isFile() && dirent.name.endsWith('.js')) {
-        if (initFn) {
-          await initFn(fullPath);
-        }
+        if (initFn) await initFn(fullPath);
       }
     }
   } catch (err) {
@@ -113,37 +105,45 @@ const loadDirectory = async (dirPath, initFn = null) => {
   }
 };
 
-// Load Commands (supports nested folders like /commands/tickets/create.js)
+// --- Load Commands ---
 await loadDirectory(join(__dirname, 'commands'), async (filePath) => {
-  const command = await import(filePath);
-  if (command.data && typeof command.execute === 'function') {
-    client.commands.set(command.data.name, command);
-    logger.debug(`Loaded command: ${command.data.name}`);
-  } else {
-    logger.warn(`Skipped invalid command: ${filePath}`);
-  }
-});
-
-// Load Events
-await loadDirectory(join(__dirname, 'events'), async (filePath) => {
-  const event = await import(filePath);
-  if (event.name && typeof event.execute === 'function') {
-    if (event.once) {
-      client.once(event.name, (...args) => event.execute(...args, client));
+  try {
+    const command = await import(filePath);
+    if (command.data && typeof command.execute === 'function') {
+      client.commands.set(command.data.name, command);
+      logger.debug(`Loaded command: ${command.data.name}`);
     } else {
-      client.on(event.name, (...args) => event.execute(...args, client));
+      logger.warn(`Skipped invalid command: ${filePath}`);
     }
-    logger.debug(`Loaded event: ${event.name}`);
-  } else {
-    logger.warn(`Skipped invalid event: ${filePath}`);
+  } catch (err) {
+    logger.error(`Failed to load command ${filePath}:`, err.message);
   }
 });
 
-// Initialize subsystems
+// --- Load Events ---
+await loadDirectory(join(__dirname, 'events'), async (filePath) => {
+  try {
+    const event = await import(filePath);
+    if (event.name && typeof event.execute === 'function') {
+      if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args, client));
+      } else {
+        client.on(event.name, (...args) => event.execute(...args, client));
+      }
+      logger.debug(`Loaded event: ${event.name}`);
+    } else {
+      logger.warn(`Skipped invalid event: ${filePath}`);
+    }
+  } catch (err) {
+    logger.error(`Failed to load event ${filePath}:`, err.message);
+  }
+});
+
+// --- Initialize Subsystems ---
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
-initTickets(client); // even if tickets are command-based, this can register listeners or helpers
+// ✅ Tickets are handled via commands — no init needed
 
 logger.info(`✅ Loaded ${client.commands.size} commands and all events`);
 
