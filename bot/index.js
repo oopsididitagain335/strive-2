@@ -6,17 +6,17 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import fs from 'node:fs/promises';
 
-// --- Utils & Security ---
+// --- Bot-local utils (inside /bot/utils) ---
 import { logger } from './utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
 import { initSecurity } from './security/index.js';
-// ❌ Removed: import { initTickets } from './tickets/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const PROJECT_ROOT = join(__dirname, '..');
 
-// --- Validate critical environment variables ---
+// --- Validate env ---
 const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'ADMIN_ID'];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -25,7 +25,7 @@ for (const key of requiredEnv) {
   }
 }
 
-// --- Discord Client Setup ---
+// --- Client setup ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -34,9 +34,9 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildVoiceStates,       // Music
-    GatewayIntentBits.GuildPresences,         // Automation
-    GatewayIntentBits.GuildInvites,           // Security
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildInvites,
     GatewayIntentBits.AutoModerationExecution,
   ],
   partials: [Partials.Channel, Partials.Message, Partials.User, Partials.Reaction],
@@ -47,7 +47,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// --- Global Error Handling (Stay Online!) ---
+// --- Error handling ---
 process.on('unhandledRejection', (reason) => {
   logger.warn('⚠️ Unhandled Rejection:', reason?.message || String(reason));
 });
@@ -63,12 +63,8 @@ process.on('uncaughtException', (err) => {
   }
 });
 
-// --- MongoDB Connection ---
-await mongoose.connect(process.env.MONGO_URI, {
-  maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
-});
+// --- DB ---
+await mongoose.connect(process.env.MONGO_URI);
 logger.info('✅ Connected to MongoDB');
 
 // --- Optional Redis ---
@@ -86,7 +82,7 @@ if (process.env.REDIS_URL) {
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
-// --- Recursive Loader ---
+// --- Recursive loader ---
 const loadDirectory = async (dirPath, initFn = null) => {
   try {
     const files = await fs.readdir(dirPath, { withFileTypes: true });
@@ -105,10 +101,10 @@ const loadDirectory = async (dirPath, initFn = null) => {
   }
 };
 
-// --- Load Commands ---
-await loadDirectory(join(__dirname, 'commands'), async (filePath) => {
+// --- Load commands (from root /commands) ---
+await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
   try {
-    const command = await import(filePath);
+    const command = await import(`file://${filePath}`);
     if (command.data && typeof command.execute === 'function') {
       client.commands.set(command.data.name, command);
       logger.debug(`Loaded command: ${command.data.name}`);
@@ -120,10 +116,10 @@ await loadDirectory(join(__dirname, 'commands'), async (filePath) => {
   }
 });
 
-// --- Load Events ---
+// --- Load events (from /bot/events) ---
 await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   try {
-    const event = await import(filePath);
+    const event = await import(`file://${filePath}`);
     if (event.name && typeof event.execute === 'function') {
       if (event.once) {
         client.once(event.name, (...args) => event.execute(...args, client));
@@ -139,15 +135,14 @@ await loadDirectory(join(__dirname, 'events'), async (filePath) => {
   }
 });
 
-// --- Initialize Subsystems ---
+// --- Init subsystems (all inside /bot) ---
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
-// ✅ Tickets are handled via commands — no init needed
 
 logger.info(`✅ Loaded ${client.commands.size} commands and all events`);
 
-// --- Graceful Shutdown ---
+// --- Shutdown ---
 const shutdown = async (signal) => {
   logger.warn(`Received ${signal} — shutting down gracefully...`);
   try {
