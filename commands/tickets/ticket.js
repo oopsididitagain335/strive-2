@@ -1,15 +1,23 @@
-// /commands/tickets/ticket.js
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
   .setDescription('Create or manage support tickets')
-  .addSubcommand(sc => sc.setName('create').setDescription('Open a new ticket'))
-  .addSubcommand(sc => sc.setName('close').setDescription('Close the current ticket'))
-  .addSubcommand(sc => sc
-    .setName('panel')
-    .setDescription('Generate a ticket panel (admin only)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+  .addSubcommand(sc =>
+    sc
+      .setName('create')
+      .setDescription('Open a new ticket')
+  )
+  .addSubcommand(sc =>
+    sc
+      .setName('close')
+      .setDescription('Close the current ticket')
+  )
+  .addSubcommand(sc =>
+    sc
+      .setName('panel')
+      .setDescription('Generate a ticket panel (admin only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
   );
 
 export async function execute(interaction) {
