@@ -2,7 +2,7 @@ import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from 'discord.j
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
-  .setDescription('Create or manage support tickets')
+  .setDescription('Create or manage support tickets') // Global description
   .addSubcommand(sc =>
     sc
       .setName('create')
@@ -17,7 +17,6 @@ export const data = new SlashCommandBuilder()
     sc
       .setName('panel')
       .setDescription('Generate a ticket panel (admin only)')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels) // Correctly chained
   );
 
 export async function execute(interaction) {
@@ -25,16 +24,17 @@ export async function execute(interaction) {
 
   if (sub === 'create') {
     try {
-      // Ensure the channel supports thread creation
+      // Ensure the bot has permission to create threads
       if (!interaction.channel.permissionsFor(interaction.client.user).has(PermissionFlagsBits.CreatePrivateThreads)) {
         return interaction.reply({ content: '❌ I lack permission to create threads in this channel.', ephemeral: true });
       }
 
       const thread = await interaction.channel.threads.create({
         name: `ticket-${interaction.user.username}`,
-        autoArchiveDuration: 1440,
+        autoArchiveDuration: 1440, // 24 hours
         type: ChannelType.PrivateThread,
       });
+
       await thread.members.add(interaction.user.id);
       await interaction.reply({ content: `✅ Ticket created: ${thread}`, ephemeral: true });
     } catch (error) {
@@ -46,6 +46,7 @@ export async function execute(interaction) {
     if (!interaction.channel.isThread()) {
       return interaction.reply({ content: '❌ This command must be used in a ticket thread.', ephemeral: true });
     }
+
     try {
       await interaction.channel.setArchived(true);
       await interaction.reply('🔒 Ticket closed.');
@@ -55,12 +56,17 @@ export async function execute(interaction) {
     }
 
   } else if (sub === 'panel') {
+    // ✅ Restrict this subcommand to admins only
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return interaction.reply({ content: '❌ You lack permission to use this command.', ephemeral: true });
+    }
+
     try {
       // Generate a unique token for dashboard setup
       const token = require('crypto').randomBytes(32).toString('hex');
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
 
-      // Store in memory (consider using a database for production)
+      // Store token in memory (consider a database for production)
       if (!interaction.client.strive) interaction.client.strive = {};
       if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
       interaction.client.strive.ticketTokens.set(token, {
@@ -79,7 +85,4 @@ export async function execute(interaction) {
       });
     } catch (error) {
       console.error('Error generating panel:', error);
-      await interaction.reply({ content: '❌ Failed to generate ticket panel.', ephemeral: true });
-    }
-  }
-}
+      await interaction.reply({ content: '❌ Failed to generate ticket panel.', ephemera
