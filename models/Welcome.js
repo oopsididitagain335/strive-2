@@ -1,34 +1,22 @@
-// models/WelcomeChannel.js
-const mongoose = require("mongoose");
+// models/Welcome.js
+import mongoose from 'mongoose';
 
-const welcomeChannelSchema = new mongoose.Schema({
-  guildId: { 
-    type: String, 
-    required: true, 
-    unique: true 
+const welcomeSchema = new mongoose.Schema({
+  guildId: {
+    type: String,
+    required: true,
+    unique: true, // Ensures one welcome config per guild
   },
-  channelId: { 
-    type: String, 
-    required: true 
+  channelId: {
+    type: String,
+    required: true,
   },
-  imageUrl: { 
-    type: String, 
-    default: null,
-    validate: {
-      validator: function(v) {
-        if (!v) return true; // Allow null
-        try {
-          new URL(v);
-          return /\.(jpg|jpeg|png|gif|webp)$/i.test(v);
-        } catch {
-          return false;
-        }
-      },
-      message: props => `${props.value} is not a valid image URL!`
-    }
-  }
+  imageUrl: {
+    type: String,
+    default: null, // Optional image URL
+  },
 }, {
-  timestamps: true
+  timestamps: true, // Adds createdAt and updatedAt fields
 });
 
-module.exports = mongoose.model("WelcomeChannel", welcomeChannelSchema);
+export default mongoose.model('Welcome', welcomeSchema);
