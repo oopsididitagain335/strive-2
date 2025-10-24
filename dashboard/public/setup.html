@@ -12,6 +12,7 @@
     button { padding: 10px 20px; background: #007bff; border: none; border-radius: 5px; color: #eee; cursor: pointer; }
     button:hover { background: #0056b3; }
     label { display: block; margin-top: 10px; }
+    .instructions { color: #888; font-size: 0.9em; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -42,6 +43,7 @@
     <input type="text" id="embed-color" placeholder="#FF0000" value="#5865F2">
 
     <button onclick="savePanelConfig()">Save and Send Panel</button>
+    <div class="instructions">If the server is unavailable, ensure the bot is running and `solbot.store` is accessible.</div>
   </div>
 
   <script>
@@ -52,7 +54,7 @@
         document.getElementById('status').innerHTML = '<span class="error">❌ Missing setup token.</span>';
         return;
       }
-      console.log('Loading setup with token:', token);
+      console.log('Loading setup with token:', token, 'at:', new Date().toISOString());
 
       try {
         const res = await fetch(`${window.location.origin}/api/setup-info?token=${encodeURIComponent(token)}`, {
@@ -60,7 +62,7 @@
           credentials: 'include'
         });
         const data = await res.json();
-        console.log('API response:', res.status, data);
+        console.log('API response:', res.status, data, 'at:', new Date().toISOString());
 
         if (!res.ok) {
           document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || `HTTP ${res.status} error`}</span>`;
@@ -85,7 +87,7 @@
           channelSelect.appendChild(option);
         });
       } catch (e) {
-        console.error('Fetch error:', e);
+        console.error('Fetch error:', e, 'at:', new Date().toISOString());
         document.getElementById('status').innerHTML = '<span class="error">❌ Network error or server unavailable.</span>';
       }
     }
@@ -110,7 +112,7 @@
           credentials: 'include'
         });
         const data = await res.json();
-        console.log('Save response:', res.status, data);
+        console.log('Save response:', res.status, data, 'at:', new Date().toISOString());
 
         if (!res.ok) {
           document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || `HTTP ${res.status} error`}</span>`;
@@ -119,7 +121,7 @@
 
         document.getElementById('status').innerText = '✅ Panel sent successfully!';
       } catch (e) {
-        console.error('Save error:', e);
+        console.error('Save error:', e, 'at:', new Date().toISOString());
         document.getElementById('status').innerHTML = '<span class="error">❌ Network error or server unavailable.</span>';
       }
     }
