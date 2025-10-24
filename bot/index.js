@@ -1,4 +1,3 @@
-// /bot/index.js
 import { Client, Collection, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType } from 'discord.js';
 import mongoose from 'mongoose';
 import 'dotenv/config';
@@ -26,7 +25,6 @@ const requiredEnv = [
   'SESSION_KEY',
   'REDIRECT_URI',
   'ENCRYPTION_SECRET',
-  // BASE_URL optional but recommended
 ];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -124,19 +122,40 @@ client.once('ready', async () => {
 
 // === LOAD EVENTS ===
 try {
-  const eventsPath = join(PROJECT_ROOT, 'events');
-  const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
-  for (const file of eventFiles) {
-    if (file.isFile() && file.name.endsWith('.js')) {
-      const filePath = join(eventsPath, file.name);
-      const event = await import(`file://${filePath}`);
-      if (event.once) client.once(event.name, (...args) => event.execute(...args, client));
-      else client.on(event.name, (...args) => event.execute(...args, client));
-      logger.debug(`Loaded event: ${event.name}`);
+  const eventsPath = join(__dirname, 'events'); // Use __dirname directly since events is in same dir
+  logger.debug(`Attempting to load events from: ${eventsPath}`);
+  try {
+    await fs.access(eventsPath); // Check if directory exists
+    const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
+    logger.debug(`Found ${eventFiles.length} items in events directory`);
+    
+    for (const file of eventFiles) {
+      if (file.isFile() && file.name.endsWith('.js')) {
+        const filePath = join(eventsPath, file.name);
+        try {
+          const event = await import(`file://${filePath}`);
+          const eventModule = event.default || event; // Handle ES module default export
+          if (!eventModule.name || typeof eventModule.execute !== 'function') {
+            logger.warn(`Skipped invalid event file: ${file.name} (missing name or execute function)`);
+            continue;
+          }
+          if (eventModule.once) {
+            client.once(eventModule.name, (...args) => eventModule.execute(...args, client));
+          } else {
+            client.on(eventModule.name, (...args) => eventModule.execute(...args, client));
+          }
+          logger.debug(`Loaded event: ${eventModule.name} from ${file.name}`);
+        } catch (err) {
+          logger.error(`Failed to load event file ${file.name}:`, err.message);
+        }
+      }
     }
+    logger.info(`✅ Loaded ${client.listenerCount('ready') + client.listenerCount('messageCreate') + client.listenerCount('interactionCreate')} event listeners`);
+  } catch (err) {
+    logger.warn('⚠️ Events directory not found or inaccessible:', err.message);
   }
 } catch (err) {
-  logger.warn('No events directory found or failed to load events:', err?.message ?? err);
+  logger.error('Unexpected error loading events:', err.message);
 }
 
 // === Express dashboard + API server ===
@@ -340,12 +359,10 @@ app.post('/api/ticket/deploy', async (req, res) => {
       const b = safeButtons[i] || {};
       const label = String(b.label || `Open ${i + 1}`).slice(0, 80);
       const styleKey = String(b.style || 'PRIMARY').toUpperCase();
-      // Map style strings to ButtonStyle enum (support Primary, Secondary, Success, Danger)
       let style = ButtonStyle.Primary;
-      if (styleKey === 'SECONDARY' || styleKey === 'SECONDARY') style = ButtonStyle.Secondary;
+      if (styleKey === 'SECONDARY') style = ButtonStyle.Secondary;
       if (styleKey === 'SUCCESS') style = ButtonStyle.Success;
       if (styleKey === 'DANGER') style = ButtonStyle.Danger;
-      // customId should be unique and deterministic per-button; include token fragment to avoid collisions
       const tokenShort = (token || '').slice(0, 16).replace(/[:/+=]/g, '');
       const customId = `ticket:${tokenShort}:${i}`;
       const button = new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style);
