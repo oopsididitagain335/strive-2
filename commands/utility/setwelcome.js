@@ -1,14 +1,15 @@
 // /commands/utility/setwelcome.js
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import Welcome from '../../models/Welcome.js'; // <-- import model
 
 export const data = new SlashCommandBuilder()
   .setName('setwelcome')
-  .setDescription('Preview a welcome embed using only server description, icon, and banner')
+  .setDescription('Set and preview the welcome channel (uses server info only)')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addChannelOption(option =>
     option
       .setName('channel')
-      .setDescription('Channel to preview the welcome embed')
+      .setDescription('Channel to send the welcome message')
       .setRequired(true)
       .addChannelTypes([ChannelType.GuildText])
   );
@@ -17,7 +18,7 @@ export async function execute(interaction) {
   const { guild } = interaction;
   const channel = interaction.options.getChannel('channel');
 
-  // Ensure bot can send messages
+  // Check bot permissions
   if (!channel.permissionsFor(guild.members.me).has('SendMessages')) {
     return interaction.reply({
       content: '❌ I need **Send Messages** permission in that channel.',
@@ -25,26 +26,32 @@ export async function execute(interaction) {
     });
   }
 
-  // Use server description; fallback if empty
+  // Save to database
+  try {
+    await Welcome.findOneAndUpdate(
+      { guildId: guild.id },
+      { channelId: channel.id },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('Error saving welcome channel:', err);
+    return interaction.reply({
+      content: '❌ Failed to save the welcome channel to the database.',
+      ephemeral: true
+    });
+  }
+
+  // Prepare embed
   const description = guild.description?.trim() || `Welcome to **${guild.name}**!`;
 
-  // Build embed with NO user mention, NO custom text
   const embed = new EmbedBuilder()
     .setTitle(`Welcome to ${guild.name}!`)
     .setDescription(description)
     .setColor(0x00FF00);
 
-  // Logo = server icon
-  if (guild.icon) {
-    embed.setThumbnail(guild.iconURL({ size: 256 }));
-  }
-
-  // Banner = server banner (or splash)
-  if (guild.banner) {
-    embed.setImage(guild.bannerURL({ size: 1024 }));
-  } else if (guild.splash) {
-    embed.setImage(guild.splashURL({ size: 1024 }));
-  }
+  if (guild.icon) embed.setThumbnail(guild.iconURL({ size: 256 }));
+  if (guild.banner) embed.setImage(guild.bannerURL({ size: 1024 }));
+  else if (guild.splash) embed.setImage(guild.splashURL({ size: 1024 }));
 
   // Send preview
   try {
@@ -54,7 +61,7 @@ export async function execute(interaction) {
     });
 
     await interaction.reply({
-      content: `✅ Preview sent to ${channel}.`,
+      content: `✅ Welcome channel set to ${channel}. Preview sent.`,
       ephemeral: true
     });
   } catch (err) {
