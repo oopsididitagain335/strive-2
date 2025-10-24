@@ -1,5 +1,5 @@
 import pkg from 'discord.js';
-const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionResponseFlags } = pkg;
+const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = pkg;
 import { logger } from '../utils/logger.js';
 import crypto from 'crypto';
 
@@ -11,7 +11,7 @@ export async function execute(interaction, client) {
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('create_ticket_')) {
       try {
-        await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+        await interaction.deferReply({ ephemeral: true });
 
         // Find or create the "Strive Tickets" category
         let category = interaction.guild.channels.cache.find(
@@ -88,7 +88,7 @@ export async function execute(interaction, client) {
 
         await interaction.followUp({
           content: `✅ Ticket created: ${ticketChannel}`,
-          flags: InteractionResponseFlags.Ephemeral,
+          ephemeral: true,
         });
 
         logger.info('TICKET_CREATED', {
@@ -101,7 +101,7 @@ export async function execute(interaction, client) {
         try {
           await interaction.followUp({
             content: '❌ Failed to create ticket.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
         } catch (followUpError) {
           console.error('Follow-up error:', followUpError);
@@ -115,13 +115,13 @@ export async function execute(interaction, client) {
       }
     } else if (interaction.customId.startsWith('close_ticket_')) {
       try {
-        await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+        await interaction.deferReply({ ephemeral: true });
 
         const channel = interaction.channel;
         if (!channel.isTextBased()) {
           await interaction.followUp({
             content: '❌ This command must be used in a ticket channel.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -130,7 +130,7 @@ export async function execute(interaction, client) {
         if (!hasPermission) {
           await interaction.followUp({
             content: '❌ You do not have permission to close this ticket.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -146,7 +146,7 @@ export async function execute(interaction, client) {
         try {
           await interaction.followUp({
             content: '❌ Failed to close ticket.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
         } catch (followUpError) {
           console.error('Follow-up error:', followUpError);
@@ -160,13 +160,13 @@ export async function execute(interaction, client) {
       }
     } else if (interaction.customId.startsWith('claim_ticket_')) {
       try {
-        await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+        await interaction.deferReply({ ephemeral: true });
 
         const channel = interaction.channel;
         if (!channel.isTextBased()) {
           await interaction.followUp({
             content: '❌ This command must be used in a ticket channel.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -175,7 +175,7 @@ export async function execute(interaction, client) {
         if (!hasPermission) {
           await interaction.followUp({
             content: '❌ You do not have permission to claim this ticket.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -186,7 +186,7 @@ export async function execute(interaction, client) {
 
         await interaction.followUp({
           content: '✅ Ticket claimed.',
-          flags: InteractionResponseFlags.Ephemeral,
+          ephemeral: true,
         });
 
         logger.info('TICKET_CLAIMED', {
@@ -199,7 +199,7 @@ export async function execute(interaction, client) {
         try {
           await interaction.followUp({
             content: '❌ Failed to claim ticket.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
         } catch (followUpError) {
           console.error('Follow-up error:', followUpError);
@@ -213,13 +213,13 @@ export async function execute(interaction, client) {
       }
     } else if (interaction.customId.startsWith('reminder_ticket_')) {
       try {
-        await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+        await interaction.deferReply({ ephemeral: true });
 
         const channel = interaction.channel;
         if (!channel.isTextBased()) {
           await interaction.followUp({
             content: '❌ This command must be used in a ticket channel.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -231,7 +231,7 @@ export async function execute(interaction, client) {
         if (!opener) {
           await interaction.followUp({
             content: '❌ Could not identify ticket opener.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
           return;
         }
@@ -243,7 +243,7 @@ export async function execute(interaction, client) {
 
         await interaction.followUp({
           content: '✅ Reminder sent to ticket opener.',
-          flags: InteractionResponseFlags.Ephemeral,
+          ephemeral: true,
         });
 
         logger.info('TICKET_REMINDER_SENT', {
@@ -257,7 +257,7 @@ export async function execute(interaction, client) {
         try {
           await interaction.followUp({
             content: '❌ Failed to send reminder.',
-            flags: InteractionResponseFlags.Ephemeral,
+            ephemeral: true,
           });
         } catch (followUpError) {
           console.error('Follow-up error:', followUpError);
@@ -305,7 +305,7 @@ export async function execute(interaction, client) {
     });
     await interaction.reply({
       content: '❌ You do not have permission to use this command.',
-      flags: InteractionResponseFlags.Ephemeral,
+      ephemeral: true,
     });
     return;
   }
@@ -330,9 +330,9 @@ export async function execute(interaction, client) {
     const errorMessage = '❌ An error occurred while running this command.';
     try {
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: errorMessage, flags: InteractionResponseFlags.Ephemeral });
+        await interaction.followUp({ content: errorMessage, ephemeral: true });
       } else {
-        await interaction.reply({ content: errorMessage, flags: InteractionResponseFlags.Ephemeral });
+        await interaction.reply({ content: errorMessage, ephemeral: true });
       }
     } catch (followUpError) {
       logger.error('COMMAND_FOLLOWUP_ERROR', {
