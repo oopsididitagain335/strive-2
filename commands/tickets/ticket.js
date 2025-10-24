@@ -4,80 +4,22 @@ import crypto from 'crypto';
 export const data = new SlashCommandBuilder()
   .setName('ticket')
   .setDescription('Create or manage support tickets')
-  .addSubcommand(sc => sc.setName('create').setDescription('Open a new ticket'))
-  .addSubcommand(sc => sc.setName('panel').setDescription('Generate a ticket panel (admin only)'));
+  .addSubcommand(sc => sc.setName('create').setDescription('Send a default ticket panel to the current channel'))
+  .addSubcommand(sc => sc.setName('panel').setDescription('Generate a custom ticket panel (admin only)'));
 
 export async function execute(interaction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'create') {
     try {
-      // Find or create the "Strive Tickets" category
-      let category = interaction.guild.channels.cache.find(
-        ch => ch.type === ChannelType.GuildCategory && ch.name === 'Strive Tickets'
-      );
-
-      if (!category) {
-        category = await interaction.guild.channels.create({
-          name: 'Strive Tickets',
-          type: ChannelType.GuildCategory,
-          permissionOverwrites: [
-            {
-              id: interaction.guild.id,
-              deny: [PermissionFlagsBits.ViewChannel],
-            },
-            {
-              id: interaction.client.user.id,
-              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels],
-            },
-          ],
-        });
-      }
-
-      // Create the ticket thread
-      const thread = await interaction.channel.threads.create({
-        name: `ticket-${interaction.user.username}-${crypto.randomBytes(4).toString('hex')}`,
-        autoArchiveDuration: 1440,
-        type: ChannelType.PrivateThread,
-      });
-
-      // Move thread to Strive Tickets category
-      await thread.setParent(category.id);
-      await thread.members.add(interaction.user.id);
-
-      // Create ticket embed
-      const ticketEmbed = new EmbedBuilder()
-        .setTitle('Support Ticket')
-        .setDescription('Welcome to your support ticket. A staff member will assist you shortly.')
-        .setColor('#5865F2')
-        .setTimestamp();
-
-      // Create ticket buttons
-      const ticketButtons = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`claim_ticket_${thread.id}`)
-          .setLabel('Claim')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`close_ticket_${thread.id}`)
-          .setLabel('Close')
-          .setStyle(ButtonStyle.Danger),
-        new ButtonBuilder()
-          .setCustomId(`reminder_ticket_${thread.id}`)
-          .setLabel('Reminder')
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      // Send ticket embed with buttons to the thread
-      await thread.send({ embeds: [ticketEmbed], components: [ticketButtons] });
-
-      // Send default ticket panel to the current channel
+      // Create default ticket panel embed
       const panelEmbed = new EmbedBuilder()
         .setTitle('Support Ticket Panel')
         .setDescription('Click the button below to create a support ticket.')
         .setColor('#5865F2')
         .setTimestamp();
 
+      // Create ticket panel button
       const panelButton = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`create_ticket_${interaction.guild.id}`)
@@ -85,11 +27,12 @@ export async function execute(interaction) {
           .setStyle(ButtonStyle.Primary)
       );
 
+      // Send the ticket panel to the current channel
       await interaction.channel.send({ embeds: [panelEmbed], components: [panelButton] });
-      await interaction.reply({ content: `✅ Ticket created: ${thread}`, ephemeral: true });
+      await interaction.reply({ content: '✅ Ticket panel sent to this channel.', ephemeral: true });
     } catch (error) {
       console.error('Create error:', error);
-      await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
+      await interaction.reply({ content: '❌ Failed to send ticket panel.', ephemeral: true });
     }
 
   } else if (sub === 'panel') {
