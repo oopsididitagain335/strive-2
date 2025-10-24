@@ -1,4 +1,3 @@
-// /dashboard/server.js
 import express from 'express';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
@@ -72,7 +71,7 @@ app.get('/login', (req, res) => {
   res.redirect(url.toString());
 });
 
-// Callback — FULL DEBUGGING
+// Callback
 app.get('/auth/callback', async (req, res) => {
   console.log('🔍 OAuth callback triggered. Query:', req.query);
 
@@ -119,22 +118,42 @@ app.get('/auth/callback', async (req, res) => {
       return res.status(400).send('Authorization failed: could not fetch user.');
     }
 
-    // Save session
-    req.session.discordUser = user;
-    console.log('✅ User logged in:', user.username);
+    // Fetch guilds
+    const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const guilds = await guildsRes.json();
 
-    // Redirect
-    let redirect = '/dashboard';
-    if (state) {
-      try {
-        redirect = decodeURIComponent(state);
-        if (!redirect.startsWith('/')) redirect = '/dashboard';
-      } catch (e) {
-        redirect = '/dashboard';
-      }
+    if (!guildsRes.ok) {
+      console.error('❌ Failed to fetch guilds:', guilds);
+      return res.status(400).send('Authorization failed: could not fetch guilds.');
     }
 
-    res.redirect(redirect);
+    // Save session
+    req.session.discordUser = user;
+    req.session.userGuilds = guilds;
+    console.log('✅ User logged in:', user.username, 'with', guilds.length, 'guilds');
+
+    // Save session explicitly before redirect
+    req.session.save((err) => {
+      if (err) {
+        console.error('❌ Session save error:', err);
+        return res.status(500).send('Internal error: could not save session.');
+      }
+
+      // Redirect
+      let redirect = '/dashboard';
+      if (state) {
+        try {
+          redirect = decodeURIComponent(state);
+          if (!redirect.startsWith('/')) redirect = '/dashboard';
+        } catch (e) {
+          redirect = '/dashboard';
+        }
+      }
+
+      res.redirect(redirect);
+    });
   } catch (err) {
     console.error('🔥 Callback error:', err.message, err.stack);
     res.status(500).send('Internal error. Please try again.');
