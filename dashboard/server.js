@@ -12,9 +12,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const app = express();
 
+// Validate critical env vars
+const required = ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'MONGO_URI', 'SESSION_KEY'];
+for (const key of required) {
+  if (!process.env[key]) {
+    console.error(`❌ Missing environment variable: ${key}`);
+    process.exit(1);
+  }
+}
+
 // Security
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for dev; tighten in prod
+  contentSecurityPolicy: false,
 }));
 
 // Static files
@@ -24,12 +33,7 @@ app.use(express.static(join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// === SESSION SETUP (CRITICAL) ===
-if (!process.env.SESSION_KEY) {
-  console.error('❌ SESSION_KEY is required');
-  process.exit(1);
-}
-
+// Session
 app.use(session({
   secret: process.env.SESSION_KEY,
   resave: false,
@@ -37,12 +41,12 @@ app.use(session({
   store: MongoStore.create({
     mongoUrl: process.env.MONGO_URI,
     collection: 'sessions',
-    ttl: 14 * 24 * 60 * 60 // 14 days
+    ttl: 14 * 24 * 60 * 60
   }),
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // true only on HTTPS (Render sets this)
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'lax', // ✅ MUST be 'lax' to allow OAuth redirect from Discord
+    sameSite: 'lax',
     maxAge: 14 * 24 * 60 * 60 * 1000
   }
 }));
@@ -55,31 +59,37 @@ function ensureAuth(req, res, next) {
   next();
 }
 
-// === LOGIN ===
+// Login
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
-  // Use simple URL encoding (not base64) to avoid length/encoding issues
   const state = encodeURIComponent(redirect);
   const url = new URL('https://discord.com/api/oauth2/authorize');
   url.searchParams.set('client_id', process.env.CLIENT_ID);
-  url.searchParams.set('redirect_uri', process.env.REDIRECT_URI); // Must match Discord exactly
+  url.searchParams.set('redirect_uri', process.env.REDIRECT_URI);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'identify guilds');
   url.searchParams.set('state', state);
   res.redirect(url.toString());
 });
 
-// === CALLBACK (FIXED) ===
+// Callback — FULL DEBUGGING
 app.get('/auth/callback', async (req, res) => {
-  const { code, state } = req.query;
+  console.log('🔍 OAuth callback triggered. Query:', req.query);
+
+  const { code, state, error, error_description } = req.query;
+
+  if (error) {
+    console.error('❌ Discord OAuth error:', error, error_description);
+    return res.status(400).send(`Authorization failed: ${error} - ${error_description}`);
+  }
 
   if (!code) {
-    console.error('No code in callback');
+    console.error('❌ No code received. Full query:', req.query);
     return res.status(400).send('Authorization failed: no code received.');
   }
 
   try {
-    // Step 1: Exchange code for token
+    // Exchange code for token
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -88,44 +98,36 @@ app.get('/auth/callback', async (req, res) => {
         client_secret: process.env.CLIENT_SECRET,
         code,
         grant_type: 'authorization_code',
-        redirect_uri: process.env.REDIRECT_URI // Must match exactly
+        redirect_uri: process.env.REDIRECT_URI
       })
     });
 
     const tokens = await tokenRes.json();
     if (!tokenRes.ok) {
-      console.error('Token exchange failed:', tokens);
+      console.error('❌ Token exchange failed:', tokens);
       return res.status(400).send('Authorization failed: invalid token exchange.');
     }
 
-    // Step 2: Fetch user + guilds
-    const [userRes, guildsRes] = await Promise.all([
-      fetch('https://discord.com/api/users/@me', {
-        headers: { Authorization: `Bearer ${tokens.access_token}` }
-      }),
-      fetch('https://discord.com/api/users/@me/guilds', {
-        headers: { Authorization: `Bearer ${tokens.access_token}` }
-      })
-    ]);
+    // Fetch user
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const user = await userRes.json();
 
-    if (!userRes.ok || !guildsRes.ok) {
-      console.error('Failed to fetch user/guilds');
-      return res.status(400).send('Authorization failed: could not fetch user data.');
+    if (!userRes.ok) {
+      console.error('❌ Failed to fetch user:', user);
+      return res.status(400).send('Authorization failed: could not fetch user.');
     }
 
-    const user = await userRes.json();
-    const guilds = await guildsRes.json();
-
-    // Save to session
+    // Save session
     req.session.discordUser = user;
-    req.session.userGuilds = guilds;
+    console.log('✅ User logged in:', user.username);
 
-    // Step 3: Redirect safely
+    // Redirect
     let redirect = '/dashboard';
     if (state) {
       try {
         redirect = decodeURIComponent(state);
-        // Prevent open redirect
         if (!redirect.startsWith('/')) redirect = '/dashboard';
       } catch (e) {
         redirect = '/dashboard';
@@ -134,16 +136,14 @@ app.get('/auth/callback', async (req, res) => {
 
     res.redirect(redirect);
   } catch (err) {
-    console.error('OAuth callback error:', err.message);
-    res.status(500).send('Internal error during login. Please try again.');
+    console.error('🔥 Callback error:', err.message, err.stack);
+    res.status(500).send('Internal error. Please try again.');
   }
 });
 
 // Logout
 app.get('/auth/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/');
-  });
+  req.session.destroy(() => res.redirect('/'));
 });
 
 // API
@@ -157,7 +157,7 @@ app.get('/api/servers', ensureAuth, (req, res) => {
   res.json({ servers: manageable });
 });
 
-// Public routes
+// Routes
 app.get('/', (req, res) => res.sendFile(join(__dirname, 'public', 'index.html')));
 app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(__dirname, 'public', 'dashboard.html')));
 app.get('/premium', ensureAuth, (req, res) => res.sendFile(join(__dirname, 'public', 'premium.html')));
@@ -167,10 +167,10 @@ app.get('/success', (req, res) => res.sendFile(join(__dirname, 'public', 'succes
 
 // Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
+  res.status(200).json({ status: 'OK', time: new Date().toISOString() });
 });
 
-// Start
+// Start server on 0.0.0.0:PORT
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Dashboard running on http://0.0.0.0:${PORT}`);
