@@ -92,7 +92,6 @@ if (process.env.REDIS_URL) {
 const loadCommandsRecursively = async (dir) => {
   const commands = [];
   const dirents = await fs.readdir(dir, { withFileTypes: true });
-
   for (const dirent of dirents) {
     const path = join(dir, dirent.name);
     if (dirent.isDirectory()) {
@@ -137,23 +136,20 @@ client.once('ready', async () => {
 });
 
 // Load events
-const loadEvents = async () => {
-  const eventsPath = join(__dirname, 'events');
-  const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
-  for (const file of eventFiles) {
-    if (file.isFile() && file.name.endsWith('.js')) {
-      const filePath = join(eventsPath, file.name);
-      const event = await import(`file://${filePath}`);
-      if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client));
-      } else {
-        client.on(event.name, (...args) => event.execute(...args, client));
-      }
-      logger.debug(`Loaded event: ${event.name}`);
+const eventsPath = join(__dirname, 'events');
+const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
+for (const file of eventFiles) {
+  if (file.isFile() && file.name.endsWith('.js')) {
+    const filePath = join(eventsPath, file.name);
+    const event = await import(`file://${filePath}`);
+    if (event.once) {
+      client.once(event.name, (...args) => event.execute(...args, client));
+    } else {
+      client.on(event.name, (...args) => event.execute(...args, client));
     }
+    logger.debug(`Loaded event: ${event.name}`);
   }
-};
-await loadEvents();
+}
 
 initAudit(client);
 initRateLimiter(client);
