@@ -1,22 +1,23 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
+import crypto from 'crypto'; // ✅ Use ESM import instead of require()
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
-  .setDescription('Create or manage support tickets') // Global description
+  .setDescription('Create or manage support tickets')
   .addSubcommand(sc =>
     sc
       .setName('create')
-      .setDescription('Open a new ticket')
+      .setDescription('Open a new ticket'),
   )
   .addSubcommand(sc =>
     sc
       .setName('close')
-      .setDescription('Close the current ticket')
+      .setDescription('Close the current ticket'),
   )
   .addSubcommand(sc =>
     sc
       .setName('panel')
-      .setDescription('Generate a ticket panel (admin only)')
+      .setDescription('Generate a ticket panel (admin only)'),
   );
 
 export async function execute(interaction) {
@@ -24,14 +25,13 @@ export async function execute(interaction) {
 
   if (sub === 'create') {
     try {
-      // Ensure the bot has permission to create threads
       if (!interaction.channel.permissionsFor(interaction.client.user).has(PermissionFlagsBits.CreatePrivateThreads)) {
         return interaction.reply({ content: '❌ I lack permission to create threads in this channel.', ephemeral: true });
       }
 
       const thread = await interaction.channel.threads.create({
         name: `ticket-${interaction.user.username}`,
-        autoArchiveDuration: 1440, // 24 hours
+        autoArchiveDuration: 1440,
         type: ChannelType.PrivateThread,
       });
 
@@ -56,17 +56,15 @@ export async function execute(interaction) {
     }
 
   } else if (sub === 'panel') {
-    // ✅ Restrict this subcommand to admins only
+    // Restrict to users with ManageChannels permission
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
       return interaction.reply({ content: '❌ You lack permission to use this command.', ephemeral: true });
     }
 
     try {
-      // Generate a unique token for dashboard setup
-      const token = require('crypto').randomBytes(32).toString('hex');
+      const token = crypto.randomBytes(32).toString('hex');
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
 
-      // Store token in memory (consider a database for production)
       if (!interaction.client.strive) interaction.client.strive = {};
       if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
       interaction.client.strive.ticketTokens.set(token, {
@@ -85,4 +83,7 @@ export async function execute(interaction) {
       });
     } catch (error) {
       console.error('Error generating panel:', error);
-      await interaction.reply({ content: '❌ Failed to generate ticket panel.', ephemera
+      await interaction.reply({ content: '❌ Failed to generate ticket panel.', ephemeral: true });
+    }
+  }
+}
