@@ -1,12 +1,13 @@
 import pkg from 'discord.js';
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionResponseFlags } = pkg;
+const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = pkg;
 import crypto from 'crypto';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
   .setDescription('Create or manage support tickets')
   .addSubcommand(sc => sc.setName('create').setDescription('Send a default ticket panel to the current channel'))
-  .addSubcommand(sc => sc.setName('panel').setDescription('Generate a custom ticket panel (admin only)'));
+  .addSubcommand(sc => sc.setName('panel').setDescription('Generate a custom ticket panel (admin only)'))
+  .setDefaultMemberPermissions(PermissionFlagsBits.SendMessages);
 
 export async function execute(interaction) {
   const sub = interaction.options.getSubcommand();
@@ -14,7 +15,7 @@ export async function execute(interaction) {
   if (sub === 'create') {
     try {
       // Defer the reply to avoid timeout issues
-      await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+      await interaction.deferReply({ ephemeral: true });
 
       // Create default ticket panel embed
       const panelEmbed = new EmbedBuilder()
@@ -35,11 +36,11 @@ export async function execute(interaction) {
       await interaction.channel.send({ embeds: [panelEmbed], components: [panelButton] });
 
       // Follow up with confirmation
-      await interaction.followUp({ content: '✅ Ticket panel sent to this channel.', flags: InteractionResponseFlags.Ephemeral });
+      await interaction.followUp({ content: '✅ Ticket panel sent to this channel.', ephemeral: true });
     } catch (error) {
       console.error('Create error:', error);
       try {
-        await interaction.followUp({ content: '❌ Failed to send ticket panel.', flags: InteractionResponseFlags.Ephemeral });
+        await interaction.followUp({ content: '❌ Failed to send ticket panel.', ephemeral: true });
       } catch (followUpError) {
         console.error('Follow-up error:', followUpError);
       }
@@ -47,13 +48,13 @@ export async function execute(interaction) {
 
   } else if (sub === 'panel') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      await interaction.reply({ content: '❌ You lack permission.', flags: InteractionResponseFlags.Ephemeral });
+      await interaction.reply({ content: '❌ You lack permission.', ephemeral: true });
       return;
     }
 
     try {
       // Defer the reply to avoid timeout issues
-      await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+      await interaction.deferReply({ ephemeral: true });
 
       const token = `${interaction.guild.id}-${crypto.randomBytes(16).toString('hex')}`;
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min
@@ -79,12 +80,12 @@ export async function execute(interaction) {
 
       await interaction.followUp({
         content: `🛠️ Configure your ticket panel here:\n${url}`,
-        flags: InteractionResponseFlags.Ephemeral,
+        ephemeral: true,
       });
     } catch (error) {
       console.error('Panel error:', error);
       try {
-        await interaction.followUp({ content: '❌ Failed to generate ticket panel.', flags: InteractionResponseFlags.Ephemeral });
+        await interaction.followUp({ content: '❌ Failed to generate ticket panel.', ephemeral: true });
       } catch (followUpError) {
         console.error('Follow-up error:', followUpError);
       }
