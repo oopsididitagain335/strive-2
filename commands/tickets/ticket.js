@@ -17,49 +17,69 @@ export const data = new SlashCommandBuilder()
     sc
       .setName('panel')
       .setDescription('Generate a ticket panel (admin only)')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels) // Corrected
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels) // Fixed: Called on subcommand builder
   );
 
 export async function execute(interaction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'create') {
-    const thread = await interaction.channel.threads.create({
-      name: `ticket-${interaction.user.username}`,
-      autoArchiveDuration: 1440,
-      type: ChannelType.PrivateThread,
-    });
-    await thread.members.add(interaction.user.id);
-    await interaction.reply({ content: `✅ Ticket: ${thread}`, ephemeral: true });
+    try {
+      // Ensure the channel supports thread creation
+      if (!interaction.channel.permissionsFor(interaction.client.user).has(PermissionFlagsBits.CreatePrivateThreads)) {
+        return interaction.reply({ content: '❌ I lack permission to create threads in this channel.', ephemeral: true });
+      }
+
+      const thread = await interaction.channel.threads.create({
+        name: `ticket-${interaction.user.username}`,
+        autoArchiveDuration: 1440,
+        type: ChannelType.PrivateThread,
+      });
+      await thread.members.add(interaction.user.id);
+      await interaction.reply({ content: `✅ Ticket created: ${thread}`, ephemeral: true });
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+      await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
+    }
 
   } else if (sub === 'close') {
     if (!interaction.channel.isThread()) {
-      return interaction.reply({ content: '❌ Use in a ticket thread.', ephemeral: true });
+      return interaction.reply({ content: '❌ This command must be used in a ticket thread.', ephemeral: true });
     }
-    await interaction.channel.setArchived(true);
-    await interaction.reply('🔒 Ticket closed.');
+    try {
+      await interaction.channel.setArchived(true);
+      await interaction.reply('🔒 Ticket closed.');
+    } catch (error) {
+      console.error('Error closing ticket:', error);
+      await interaction.reply({ content: '❌ Failed to close ticket.', ephemeral: true });
+    }
 
   } else if (sub === 'panel') {
-    // Generate a unique token for dashboard setup
-    const token = require('crypto').randomBytes(32).toString('hex');
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
+    try {
+      // Generate a unique token for dashboard setup
+      const token = require('crypto').randomBytes(32).toString('hex');
+      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
 
-    // Store in memory (or DB for persistence)
-    if (!interaction.client.strive) interaction.client.strive = {};
-    if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
-    interaction.client.strive.ticketTokens.set(token, {
-      guildId: interaction.guild.id,
-      userId: interaction.user.id,
-      channelId: interaction.channel.id,
-      expiresAt
-    });
+      // Store in memory (consider using a database for production)
+      if (!interaction.client.strive) interaction.client.strive = {};
+      if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
+      interaction.client.strive.ticketTokens.set(token, {
+        guildId: interaction.guild?.id,
+        userId: interaction.user.id,
+        channelId: interaction.channel.id,
+        expiresAt,
+      });
 
-    const baseUrl = process.env.BASE_URL || 'https://solbot.store';
-    const url = `${baseUrl}/setup.html?token=${token}`;
+      const baseUrl = process.env.BASE_URL || 'https://solbot.store';
+      const url = `${baseUrl}/setup.html?token=${token}`;
 
-    await interaction.reply({
-      content: `🛠️ Click to configure your ticket panel:\n${url}`,
-      ephemeral: true
-    });
+      await interaction.reply({
+        content: `🛠️ Click to configure your ticket panel:\n${url}`,
+        ephemeral: true,
+      });
+    } catch (error) {
+      console.error('Error generating panel:', error);
+      await interaction.reply({ content: '❌ Failed to generate ticket panel.', ephemeral: true });
+    }
   }
 }
