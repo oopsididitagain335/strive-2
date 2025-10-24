@@ -1,4 +1,3 @@
-// /commands/utility/ticket.js
 import {
   SlashCommandBuilder,
   ChannelType,
@@ -8,14 +7,21 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from 'discord.js';
-import Ticket from '../../../models/Ticket.js';
+import Ticket from '../../models/Ticket.js'; // ✅ fixed relative path
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
-  .setDescription('Create a new support ticket');
+  .setDescription('Create a new private support ticket.');
 
 export async function execute(interaction) {
   const { guild, user } = interaction;
+
+  if (!guild) {
+    return interaction.reply({
+      content: '❌ This command can only be used in a server.',
+      ephemeral: true,
+    });
+  }
 
   // Check for existing open ticket
   const existing = await Ticket.findOne({ guildId: guild.id, userId: user.id, closed: false });
@@ -26,13 +32,18 @@ export async function execute(interaction) {
         content: `❌ You already have an open ticket: ${existingChannel}`,
         ephemeral: true,
       });
+    } else {
+      // Channel was deleted, mark as closed in DB
+      existing.closed = true;
+      await existing.save();
     }
   }
 
-  // Optional: find or create a "Tickets" category
+  // Find or create ticket category
   let category = guild.channels.cache.find(
     c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('ticket')
   );
+
   if (!category) {
     try {
       category = await guild.channels.create({
@@ -40,53 +51,66 @@ export async function execute(interaction) {
         type: ChannelType.GuildCategory,
       });
     } catch (err) {
-      console.error('Failed to create ticket category:', err);
+      console.error('❌ Failed to create ticket category:', err);
       return interaction.reply({
-        content: '❌ Could not create ticket category. Check my permissions.',
+        content: '❌ Could not create a ticket category. Check my permissions.',
         ephemeral: true,
       });
     }
   }
 
-  // Create private channel
-  const channelName = `ticket-${user.username}`.replace(/[^a-zA-Z0-9-_]/g, '');
-  const channel = await guild.channels.create({
-    name: channelName,
-    type: ChannelType.GuildText,
-    parent: category.id,
-    permissionOverwrites: [
-      { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-    ],
-  });
+  // Create ticket channel
+  const safeName = user.username.replace(/[^a-zA-Z0-9-_]/g, '').toLowerCase();
+  const channelName = `ticket-${safeName}`;
 
-  // Save ticket to database
-  await Ticket.create({
-    guildId: guild.id,
-    userId: user.id,
-    channelId: channel.id,
-  });
+  try {
+    const channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      topic: `Ticket for ${user.tag} (${user.id})`,
+      permissionOverwrites: [
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages] },
+      ],
+    });
 
-  // Build welcome embed
-  const embed = new EmbedBuilder()
-    .setTitle('🎟️ Support Ticket')
-    .setDescription(`Hi ${user}, please describe your issue below. A staff member will assist you soon.`)
-    .setColor(0x00aaff)
-    .setTimestamp();
+    // Save ticket to MongoDB
+    await Ticket.create({
+      guildId: guild.id,
+      userId: user.id,
+      channelId: channel.id,
+      closed: false,
+      createdAt: new Date(),
+    });
 
-  // Add close button
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('close_ticket')
-      .setLabel('Close Ticket')
-      .setStyle(ButtonStyle.Danger)
-  );
+    // Embed
+    const embed = new EmbedBuilder()
+      .setTitle('🎟️ Support Ticket')
+      .setDescription(`Hi ${user}, please describe your issue below. Our staff will assist you soon.`)
+      .setColor(0x00aaff)
+      .setTimestamp();
 
-  await channel.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
+    // Button
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('close_ticket')
+        .setLabel('Close Ticket')
+        .setStyle(ButtonStyle.Danger)
+    );
 
-  await interaction.reply({
-    content: `✅ Your ticket has been created: ${channel}`,
-    ephemeral: true,
-  });
+    await channel.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
+
+    return interaction.reply({
+      content: `✅ Your ticket has been created: ${channel}`,
+      ephemeral: true,
+    });
+  } catch (err) {
+    console.error('❌ Failed to create ticket channel:', err);
+    return interaction.reply({
+      content: '❌ Failed to create your ticket channel. Check my permissions.',
+      ephemeral: true,
+    });
+  }
 }
