@@ -11,7 +11,7 @@ import MongoStore from 'connect-mongo';
 import helmet from 'helmet';
 import fetch from 'node-fetch';
 
-// Shared logger from root /utils
+// Shared logger
 import { logger } from '../utils/logger.js';
 import { initAudit } from './utils/audit.js';
 import { initRateLimiter } from './utils/rateLimiter.js';
@@ -88,101 +88,99 @@ if (process.env.REDIS_URL) {
   logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
-const loadDirectory = async (dirPath, initFn = null) => {
-  try {
-    const files = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const dirent of files) {
-      const fullPath = join(dirPath, dirent.name);
-      if (dirent.isDirectory()) {
-        await loadDirectory(fullPath, initFn);
-      } else if (dirent.isFile() && dirent.name.endsWith('.js')) {
-        if (initFn) await initFn(fullPath);
+// === RECURSIVE COMMAND LOADER ===
+const loadCommandsRecursively = async (dir) => {
+  const commands = [];
+  const dirents = await fs.readdir(dir, { withFileTypes: true });
+
+  for (const dirent of dirents) {
+    const path = join(dir, dirent.name);
+    if (dirent.isDirectory()) {
+      commands.push(...(await loadCommandsRecursively(path)));
+    } else if (dirent.isFile() && dirent.name.endsWith('.js')) {
+      try {
+        const command = await import(`file://${path}`);
+        if (command.data && typeof command.execute === 'function') {
+          commands.push(command);
+          logger.debug(`Loaded command: ${command.data.name}`);
+        } else {
+          logger.warn(`Skipped invalid command: ${path}`);
+        }
+      } catch (err) {
+        logger.error(`Failed to load command ${path}:`, {
+          message: err.message,
+          stack: err.stack,
+          code: err.code
+        });
       }
     }
-  } catch (err) {
-    if (err.code !== 'ENOENT') {
-      logger.error(`Failed to load directory ${dirPath}:`, err.message);
-    }
   }
+  return commands;
 };
 
-await loadDirectory(join(PROJECT_ROOT, 'commands'), async (filePath) => {
+const allCommands = await loadCommandsRecursively(join(PROJECT_ROOT, 'commands'));
+for (const cmd of allCommands) {
+  client.commands.set(cmd.data.name, cmd);
+}
+logger.info(`✅ Loaded ${allCommands.length} commands`);
+
+// === REGISTER COMMANDS GLOBALLY ON READY ===
+client.once('ready', async () => {
   try {
-    const command = await import(`file://${filePath}`);
-    if (command.data && typeof command.execute === 'function') {
-      client.commands.set(command.data.name, command);
-      logger.debug(`Loaded command: ${command.data.name}`);
-    } else {
-      logger.warn(`Skipped invalid command: ${filePath}`);
-    }
+    const commandData = allCommands.map(cmd => cmd.data.toJSON());
+    logger.info(`📡 Registering ${commandData.length} global commands...`);
+    await client.application.commands.set(commandData);
+    logger.info(`✅ Global commands registered. May take up to 1 hour to appear.`);
   } catch (err) {
-    logger.error(`Failed to load command ${filePath}:`, {
-      message: err.message,
-      stack: err.stack,
-      code: err.code
-    });
+    logger.error('❌ Failed to register global commands:', err);
   }
 });
 
-await loadDirectory(join(__dirname, 'events'), async (filePath) => {
-  try {
-    const event = await import(`file://${filePath}`);
-    if (event.name && typeof event.execute === 'function') {
+// Load events
+const loadEvents = async () => {
+  const eventsPath = join(__dirname, 'events');
+  const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
+  for (const file of eventFiles) {
+    if (file.isFile() && file.name.endsWith('.js')) {
+      const filePath = join(eventsPath, file.name);
+      const event = await import(`file://${filePath}`);
       if (event.once) {
         client.once(event.name, (...args) => event.execute(...args, client));
       } else {
         client.on(event.name, (...args) => event.execute(...args, client));
       }
       logger.debug(`Loaded event: ${event.name}`);
-    } else {
-      logger.warn(`Skipped invalid event: ${filePath}`);
     }
-  } catch (err) {
-    logger.error(`Failed to load event ${filePath}:`, {
-      message: err.message,
-      stack: err.stack,
-      code: err.code
-    });
   }
-});
+};
+await loadEvents();
 
 initAudit(client);
 initRateLimiter(client);
 initSecurity(client);
 
-logger.info(`✅ Loaded ${client.commands.size} commands`);
-
 // === DASHBOARD HTTP SERVER ===
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Security
-app.use(helmet({
-  contentSecurityPolicy: false, // disable for simplicity; enable in prod with proper directives
-}));
-
-// Static files
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public')));
-
-// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Session (CRITICAL FIX: sameSite: 'lax', secure only in prod)
 app.use(session({
-  secret: process.env.SESSION_KEY, // MUST be set in Render
+  secret: process.env.SESSION_KEY,
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collection: 'sessions' }),
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // true only on HTTPS (Render sets this)
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'lax', // ✅ Allows OAuth redirect from Discord
-    maxAge: 14 * 24 * 60 * 60 * 1000 // 14 days
+    sameSite: 'lax',
+    maxAge: 14 * 24 * 60 * 60 * 1000
   }
 }));
 
-// Auth middleware
 function ensureAuth(req, res, next) {
   if (!req.session.discordUser) {
     return res.redirect(`/login?redirect=${encodeURIComponent(req.originalUrl)}`);
@@ -190,10 +188,8 @@ function ensureAuth(req, res, next) {
   next();
 }
 
-// OAuth2
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
-  // Use simple URL encoding (not base64) to avoid length issues
   const state = encodeURIComponent(redirect);
   const url = new URL('https://discord.com/api/oauth2/authorize');
   url.searchParams.set('client_id', process.env.CLIENT_ID);
@@ -209,7 +205,6 @@ app.get('/auth/callback', async (req, res) => {
   if (!code) return res.status(400).send('❌ No code provided.');
 
   try {
-    // Exchange code
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -225,7 +220,6 @@ app.get('/auth/callback', async (req, res) => {
     const tokens = await tokenRes.json();
     if (!tokenRes.ok) throw new Error(tokens.error || 'Token exchange failed');
 
-    // Fetch user + guilds
     const userRes = await fetch('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${tokens.access_token}` }
     });
@@ -236,18 +230,15 @@ app.get('/auth/callback', async (req, res) => {
     req.session.discordUser = await userRes.json();
     req.session.userGuilds = await guildsRes.json();
 
-    // Decode redirect safely
     let redirect = '/dashboard';
     if (state) {
       try {
         redirect = decodeURIComponent(state);
-        // Validate redirect is relative
         if (!redirect.startsWith('/')) redirect = '/dashboard';
       } catch (e) {
         redirect = '/dashboard';
       }
     }
-
     res.redirect(redirect);
   } catch (err) {
     console.error('OAuth Error:', err.message);
@@ -259,7 +250,6 @@ app.get('/auth/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
 
-// API
 app.get('/api/user', ensureAuth, (req, res) => {
   const { id, username, avatar } = req.session.discordUser;
   res.json({
@@ -287,24 +277,14 @@ app.post('/api/ticket/deploy', ensureAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// Routes
 app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
 app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
 app.get('/premium', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'premium.html')));
 app.get('/setup.html', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html')));
 app.get('/verify', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'verify.html')));
 app.get('/success', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'success.html')));
+app.get('/health', (req, res) => res.json({ status: 'OK' }));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    bot: client.readyAt ? 'online' : 'starting',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Start HTTP server on 0.0.0.0:PORT
 app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🌐 HTTP server listening on http://0.0.0.0:${PORT}`);
 });
