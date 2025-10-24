@@ -25,7 +25,7 @@ const requiredEnv = [
   'CLIENT_SECRET',
   'SESSION_KEY',
   'REDIRECT_URI',
-  'ENCRYPTION_SECRET',
+  'ENCRYPTION_SECRET', // for ticket tokens
 ];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -47,16 +47,12 @@ const client = new Client({
 });
 client.commands = new Collection();
 
-// === DATABASE ===
+// === MONGOOSE ===
 try {
-  await mongoose.connect(process.env.MONGO_URI, {
-    maxPoolSize: 10,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-  });
+  await mongoose.connect(process.env.MONGO_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 5000, socketTimeoutMS: 45000 });
   logger.info('✅ Connected to MongoDB');
 } catch (err) {
-  console.error('❌ MongoDB connection failed', err);
+  console.error('❌ Failed to connect to MongoDB:', err);
   process.exit(1);
 }
 
@@ -64,9 +60,7 @@ try {
 if (process.env.REDIS_URL) {
   try {
     const Redis = (await import('ioredis')).default;
-    const redisClient = new Redis(process.env.REDIS_URL, {
-      retryStrategy: (times) => Math.min(times * 50, 2000),
-    });
+    const redisClient = new Redis(process.env.REDIS_URL, { retryStrategy: (times) => Math.min(times * 50, 2000) });
     redisClient.on('error', (err) => logger.warn('Redis error:', err.message));
     client.redis = redisClient;
     logger.info('✅ Connected to Redis');
@@ -76,7 +70,7 @@ if (process.env.REDIS_URL) {
   }
 } else {
   client.redis = null;
-  logger.info('ℹ️ Redis not configured — using in-memory fallback');
+  logger.info('ℹ️ Redis not configured — using in-memory fallbacks');
 }
 
 // === LOAD COMMANDS ===
@@ -85,14 +79,13 @@ const loadCommandsRecursively = async (dir) => {
   const dirents = await fs.readdir(dir, { withFileTypes: true });
   for (const dirent of dirents) {
     const path = join(dir, dirent.name);
-    if (dirent.isDirectory()) {
-      commands.push(...(await loadCommandsRecursively(path)));
-    } else if (dirent.isFile() && dirent.name.endsWith('.js')) {
+    if (dirent.isDirectory()) commands.push(...(await loadCommandsRecursively(path)));
+    else if (dirent.isFile() && dirent.name.endsWith('.js')) {
       try {
-        const command = await import(`file://${path}`);
-        if (command.data && typeof command.execute === 'function') {
-          commands.push(command);
-          logger.debug(`Loaded command: ${command.data.name}`);
+        const cmd = await import(`file://${path}`);
+        if (cmd.data && typeof cmd.execute === 'function') {
+          commands.push(cmd);
+          logger.debug(`Loaded command: ${cmd.data.name}`);
         }
       } catch (err) {
         logger.error(`Failed to load command ${path}:`, err);
@@ -101,11 +94,12 @@ const loadCommandsRecursively = async (dir) => {
   }
   return commands;
 };
-const allCommands = await loadCommandsRecursively(join(PROJECT_ROOT, 'commands'));
+
+const allCommands = await loadCommandsRecursively(join(__dirname, 'commands'));
 for (const cmd of allCommands) client.commands.set(cmd.data.name, cmd);
 logger.info(`✅ Loaded ${allCommands.length} commands`);
 
-// === REGISTER GLOBAL COMMANDS ===
+// === DISCORD READY ===
 client.once('ready', async () => {
   logger.info(`🤖 Logged in as ${client.user.tag} (${client.user.id})`);
   try {
@@ -113,24 +107,25 @@ client.once('ready', async () => {
     await client.application.commands.set(commandData);
     logger.info(`📡 Registered ${commandData.length} global commands`);
   } catch (err) {
-    logger.warn('⚠️ Failed to register global commands:', err.message);
+    logger.warn('⚠️ Failed to register global commands:', err?.message ?? err);
   }
 });
 
 // === LOAD EVENTS ===
 try {
-  const eventsPath = join(PROJECT_ROOT, 'events');
+  const eventsPath = join(__dirname, 'events'); // correct bot/events/
   const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
   for (const file of eventFiles) {
     if (file.isFile() && file.name.endsWith('.js')) {
-      const event = await import(`file://${join(eventsPath, file.name)}`);
+      const path = join(eventsPath, file.name);
+      const event = await import(`file://${path}`);
       if (event.once) client.once(event.name, (...args) => event.execute(...args, client));
       else client.on(event.name, (...args) => event.execute(...args, client));
       logger.debug(`Loaded event: ${event.name}`);
     }
   }
 } catch (err) {
-  logger.warn('No events directory found or failed to load events:', err.message);
+  logger.warn('No events directory found or failed to load events:', err?.message ?? err);
 }
 
 // === EXPRESS DASHBOARD ===
@@ -145,7 +140,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collection: 'sessions' }),
-  cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, sameSite: 'lax', maxAge: 14*24*60*60*1000 }
+  cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, sameSite: 'lax', maxAge: 14 * 24 * 60 * 60 * 1000 },
 }));
 
 function ensureAuth(req, res, next) {
@@ -153,7 +148,7 @@ function ensureAuth(req, res, next) {
   next();
 }
 
-// === OAUTH ===
+// === OAuth2 ===
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
   const state = encodeURIComponent(redirect);
@@ -173,26 +168,24 @@ app.get('/auth/callback', async (req, res) => {
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: process.env.REDIRECT_URI
-      }),
+      body: new URLSearchParams({ client_id: process.env.CLIENT_ID, client_secret: process.env.CLIENT_SECRET, grant_type: 'authorization_code', code, redirect_uri: process.env.REDIRECT_URI }),
     });
     const tokens = await tokenRes.json();
+    if (!tokenRes.ok) throw new Error(JSON.stringify(tokens));
+
     const userRes = await fetch('https://discord.com/api/users/@me', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+
     req.session.discordUser = await userRes.json();
     req.session.userGuilds = await guildsRes.json();
-    let redirectUrl = '/dashboard';
+
+    let redirect = '/dashboard';
     if (state) {
-      try { redirectUrl = decodeURIComponent(state); if (!redirectUrl.startsWith('/')) redirectUrl = '/dashboard'; } catch { redirectUrl = '/dashboard'; }
+      try { redirect = decodeURIComponent(state); if (!redirect.startsWith('/')) redirect = '/dashboard'; } catch { redirect = '/dashboard'; }
     }
-    res.redirect(redirectUrl);
+    res.redirect(redirect);
   } catch (err) {
-    logger.error('OAuth callback error', err);
+    logger.error('OAuth callback error:', err);
     res.status(500).send('❌ Login failed.');
   }
 });
@@ -211,64 +204,92 @@ app.get('/api/servers', ensureAuth, (req, res) => {
 });
 
 app.get('/api/bot-status', (req, res) => {
-  res.json({ connected: !!client.user, bot: client.user ? { id: client.user.id, tag: client.user.tag, avatar: client.user.displayAvatarURL() } : null, guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })) });
+  res.json({
+    connected: !!client.user,
+    bot: client.user ? { id: client.user.id, tag: client.user.tag, avatar: client.user.displayAvatarURL() } : null,
+    guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })),
+  });
 });
 
-// === Ticket token verification / deploy endpoints ===
+// === Ticket token verification & deploy endpoints ===
 app.get('/api/ticket/token', (req, res) => {
   const token = req.query.token;
-  if (!token) return res.status(400).json({ valid: false, message: 'No token' });
-  const payload = decryptJSON(token, process.env.ENCRYPTION_SECRET);
-  if (!payload) return res.status(400).json({ valid: false, message: 'Invalid token' });
-  if (payload.expiresAt && Date.now() > payload.expiresAt) return res.status(400).json({ valid: false, message: 'Expired' });
-  const guild = client.guilds.cache.get(payload.guildId);
-  if (!guild) return res.status(400).json({ valid: false, message: 'Bot not in guild' });
-  res.json({ valid: true, guildId: payload.guildId, guildName: payload.guildName || guild.name, userId: payload.userId });
+  if (!token) return res.status(400).json({ valid: false, message: 'No token provided' });
+  try {
+    const payload = decryptJSON(token, process.env.ENCRYPTION_SECRET);
+    if (!payload || Date.now() > payload.expiresAt) return res.status(400).json({ valid: false, message: 'Invalid or expired token' });
+    const guild = client.guilds.cache.get(payload.guildId);
+    if (!guild) return res.status(400).json({ valid: false, message: 'Bot not in guild' });
+    res.json({ valid: true, guildId: payload.guildId, guildName: payload.guildName || guild.name, userId: payload.userId });
+  } catch {
+    return res.status(500).json({ valid: false, message: 'Server error verifying token' });
+  }
 });
 
 app.post('/api/ticket/deploy', async (req, res) => {
-  const { token, title, description, color, channelId, buttons } = req.body;
-  if (!token) return res.status(400).json({ success: false, message: 'No token' });
-  const payload = decryptJSON(token, process.env.ENCRYPTION_SECRET);
-  if (!payload) return res.status(400).json({ success: false, message: 'Invalid token' });
-  if (payload.expiresAt && Date.now() > payload.expiresAt) return res.status(400).json({ success: false, message: 'Expired' });
+  try {
+    const { token, title, description, color, channelId, buttons } = req.body;
+    if (!token) return res.status(400).json({ success: false, message: 'No token provided' });
 
-  if (REQUIRE_DASHBOARD_LOGIN && (!req.session?.discordUser || String(req.session.discordUser.id) !== String(payload.userId))) {
-    return res.status(403).json({ success: false, message: 'Not token owner' });
+    const payload = decryptJSON(token, process.env.ENCRYPTION_SECRET);
+    if (!payload || Date.now() > payload.expiresAt) return res.status(400).json({ success: false, message: 'Invalid or expired token' });
+
+    if (REQUIRE_DASHBOARD_LOGIN && (!req.session?.discordUser || req.session.discordUser.id !== payload.userId))
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+
+    const guild = await client.guilds.fetch(payload.guildId).catch(() => null);
+    if (!guild) return res.status(400).json({ success: false, message: 'Bot not in target guild' });
+
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildText) return res.status(400).json({ success: false, message: 'Invalid text channel' });
+
+    const embed = new EmbedBuilder().setTitle(title || 'Support').setDescription(description || '').setColor(color || '#2f3136').setTimestamp();
+    const row = new ActionRowBuilder();
+    (Array.isArray(buttons) ? buttons.slice(0, 5) : []).forEach((b, i) => {
+      const style = { PRIMARY: ButtonStyle.Primary, SECONDARY: ButtonStyle.Secondary, SUCCESS: ButtonStyle.Success, DANGER: ButtonStyle.Danger }[b.style?.toUpperCase()] || ButtonStyle.Primary;
+      const customId = `ticket:${token.slice(0, 16).replace(/[:/+=]/g, '')}:${i}`;
+      row.addComponents(new ButtonBuilder().setCustomId(customId).setLabel(b.label || `Open ${i + 1}`).setStyle(style));
+    });
+
+    await channel.send({ embeds: [embed], components: row.components.length ? [row] : [] });
+    res.json({ success: true });
+    logger.info(`✅ Deployed ticket panel to ${guild.id}/${channel.id} by user ${payload.userId}`);
+  } catch (err) {
+    logger.error('Deploy error:', err);
+    res.status(500).json({ success: false, message: 'Server error during deploy' });
   }
-
-  const guild = await client.guilds.fetch(payload.guildId).catch(() => null);
-  if (!guild) return res.status(400).json({ success: false, message: 'Bot not in guild' });
-
-  const channel = await guild.channels.fetch(channelId).catch(() => null);
-  if (!channel || channel.type !== ChannelType.GuildText) return res.status(400).json({ success: false, message: 'Invalid channel' });
-
-  const embed = new EmbedBuilder().setTitle(title || 'Support').setDescription(description || '').setColor(color || '#2f3136').setTimestamp();
-  const row = new ActionRowBuilder();
-  (Array.isArray(buttons) ? buttons.slice(0, 5) : []).forEach((b, i) => {
-    const styleMap = { PRIMARY: ButtonStyle.Primary, SECONDARY: ButtonStyle.Secondary, SUCCESS: ButtonStyle.Success, DANGER: ButtonStyle.Danger };
-    const style = styleMap[(b.style || 'PRIMARY').toUpperCase()] || ButtonStyle.Primary;
-    row.addComponents(new ButtonBuilder().setCustomId(`ticket:${token.slice(0,16)}:${i}`).setLabel(b.label || `Button ${i+1}`).setStyle(style));
-  });
-  await channel.send({ embeds: [embed], components: row.components.length ? [row] : [] });
-  res.json({ success: true });
 });
 
-// === Serve dashboard HTML ===
+// === Serve HTML ===
+app.get('/setup.html', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html')));
 app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
 app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
-app.get('/setup.html', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html')));
+app.get('/verify', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'verify.html')));
+app.get('/success', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'success.html')));
+app.get('/health', (req, res) => res.json({ status: 'OK', time: new Date().toISOString() }));
 
-// === START SERVER & BOT ===
+// === START EXPRESS SERVER ===
 app.listen(PORT, '0.0.0.0', () => logger.info(`🌐 Dashboard running at ${BASE_URL}`));
-try { await client.login(process.env.DISCORD_TOKEN); } catch (err) { console.error('❌ Discord login failed', err); process.exit(1); }
+
+// === START DISCORD CLIENT ===
+try {
+  await client.login(process.env.DISCORD_TOKEN);
+  logger.info(`✅ Bot connected as ${client.user.tag} (${client.user.id}) — serving ${client.guilds.cache.size} cached guild(s)`);
+} catch (err) {
+  console.error('❌ Discord login failed:', err);
+  process.exit(1);
+}
 
 // === GRACEFUL SHUTDOWN ===
 async function shutdown(signal) {
-  console.log(`Received ${signal}, shutting down...`);
-  await client.destroy();
-  if (client.redis) await client.redis.quit();
-  await mongoose.disconnect();
+  logger.warn(`Received ${signal}, shutting down...`);
+  try {
+    await client.destroy();
+    if (client.redis) await client.redis.quit();
+    await mongoose.disconnect();
+  } catch (err) {
+    logger.error('Error during shutdown:', err);
+  }
   process.exit(0);
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
