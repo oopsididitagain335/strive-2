@@ -21,26 +21,46 @@ export async function execute(interaction) {
       await thread.members.add(interaction.user.id);
       await interaction.reply({ content: `✅ Ticket created: ${thread}`, ephemeral: true });
     } catch (error) {
-      console.error(error);
+      console.error('Create error:', error);
       await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
     }
 
   } else if (sub === 'close') {
-    if (!interaction.channel.isThread())
+    if (!interaction.channel.isThread()) {
       return interaction.reply({ content: '❌ Use this inside a ticket thread.', ephemeral: true });
+    }
 
-    await interaction.channel.setArchived(true);
-    await interaction.reply('🔒 Ticket closed.');
+    const thread = interaction.channel;
+    const isCreator = thread.ownerId === interaction.user.id;
+    const hasPermission = interaction.member.permissionsIn(thread).has(PermissionFlagsBits.ManageThreads);
+
+    if (!isCreator && !hasPermission) {
+      return interaction.reply({ content: '❌ You don\'t have permission to close this ticket.', ephemeral: true });
+    }
+
+    if (thread.archived) {
+      return interaction.reply({ content: '❌ This ticket is already closed.', ephemeral: true });
+    }
+
+    try {
+      await thread.setArchived(true);
+      await interaction.reply('🔒 Ticket closed.');
+    } catch (error) {
+      console.error('Close error:', error);
+      await interaction.reply({ content: '❌ Failed to close ticket.', ephemeral: true });
+    }
 
   } else if (sub === 'panel') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels))
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
       return interaction.reply({ content: '❌ You lack permission.', ephemeral: true });
+    }
 
     const token = `${interaction.guild.id}-${crypto.randomBytes(16).toString('hex')}`;
     const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min
 
     if (!interaction.client.strive) interaction.client.strive = {};
     if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
+    console.log('Storing token:', token, 'for guild:', interaction.guild.id);
 
     const channels = interaction.guild.channels.cache
       .filter(ch => ch.type === ChannelType.GuildText && ch.viewable)
@@ -63,22 +83,33 @@ export async function execute(interaction) {
   }
 }
 
-// API handler for setup info (to be used by setup.html)
 export async function handleSetupInfo(req, res) {
   const { token } = req.query;
-  if (!token) return res.status(400).json({ error: 'Missing token' });
+  if (!token) {
+    console.log('Missing token');
+    return res.status(400).json({ error: 'Missing token' });
+  }
 
-  const client = req.client; // Assume client is passed via middleware
+  const client = req.client;
   if (!client.strive?.ticketTokens?.has(token)) {
-    return res.status(400).json({ error: 'Invalid or expired token' });
+    console.log('Invalid token:', token);
+    return res.status(404).json({ error: 'Invalid token' });
   }
 
   const tokenData = client.strive.ticketTokens.get(token);
   if (tokenData.expiresAt < Date.now()) {
+    console.log('Expired token:', token);
     client.strive.ticketTokens.delete(token);
-    return res.status(400).json({ error: 'Token expired' });
+    return res.status(410).json({ error: 'Token expired' });
   }
 
+  const [guildIdFromToken] = token.split('-');
+  if (guildIdFromToken !== tokenData.guildId) {
+    console.log('Guild mismatch for token:', token, 'Expected:', tokenData.guildId, 'Got:', guildIdFromToken);
+    return res.status(403).json({ error: 'Token guild mismatch' });
+  }
+
+  console.log('Valid token:', token, 'for guild:', tokenData.guildId);
   res.json({
     bot: { tag: client.user.tag, id: client.user.id },
     guild: { id: tokenData.guildId, name: tokenData.guildName },
@@ -86,29 +117,35 @@ export async function handleSetupInfo(req, res) {
   });
 }
 
-// API handler for saving panel config
 export async function handleSavePanel(req, res) {
   const { token, channelId, panelMessage, embedColor } = req.body;
-  if (!token || !channelId) return res.status(400).json({ error: 'Missing token or channel ID' });
+  if (!token || !channelId) {
+    console.log('Missing token or channel ID');
+    return res.status(400).json({ error: 'Missing token or channel ID' });
+  }
 
   const client = req.client;
   if (!client.strive?.ticketTokens?.has(token)) {
-    return res.status(400).json({ error: 'Invalid or expired token' });
+    console.log('Invalid token in save:', token);
+    return res.status(404).json({ error: 'Invalid or expired token' });
   }
 
   const tokenData = client.strive.ticketTokens.get(token);
   if (tokenData.expiresAt < Date.now()) {
+    console.log('Expired token in save:', token);
     client.strive.ticketTokens.delete(token);
-    return res.status(400).json({ error: 'Token expired' });
+    return res.status(410).json({ error: 'Token expired' });
   }
 
   if (tokenData.guildId !== token.split('-')[0]) {
-    return res.status(400).json({ error: 'Token does not match guild' });
+    console.log('Guild mismatch in save:', token);
+    return res.status(403).json({ error: 'Token does not match guild' });
   }
 
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || channel.guildId !== tokenData.guildId) {
+      console.log('Invalid channel:', channelId);
       return res.status(400).json({ error: 'Invalid channel' });
     }
 
@@ -136,9 +173,10 @@ export async function handleSavePanel(req, res) {
     });
 
     client.strive.ticketTokens.delete(token);
+    console.log('Panel sent successfully for token:', token);
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
+    console.error('Save panel error:', error);
     res.status(500).json({ error: 'Failed to send panel' });
   }
 }
