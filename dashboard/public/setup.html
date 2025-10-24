@@ -2,16 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bot Setup</title>
+  <title>Bot Setup - Ticket Panel</title>
   <style>
     body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 30px; }
-    .card { background: #1c1c1c; padding: 20px; border-radius: 10px; display: inline-block; margin-top: 20px; }
+    .card { background: #1c1c1c; padding: 20px; border-radius: 10px; display: inline-block; margin: 20px 0; width: 90%; max-width: 600px; }
     .guild { margin: 10px 0; padding: 10px; background: #222; border-radius: 8px; }
     .error { color: #ff4c4c; }
+    select, input, textarea { width: 100%; padding: 8px; margin: 5px 0; background: #333; color: #eee; border: 1px solid #444; border-radius: 5px; }
+    button { padding: 10px 20px; background: #007bff; border: none; border-radius: 5px; color: #eee; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    label { display: block; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>🤖 Bot Setup</h1>
+  <h1>🤖 Ticket Panel Setup</h1>
   <div id="status">Loading setup info...</div>
 
   <div class="card" id="bot-info" style="display:none;">
@@ -22,6 +26,22 @@
   <div class="card" id="guild-info" style="display:none;">
     <h3 id="guild-name"></h3>
     <p>Guild ID: <span id="guild-id"></span></p>
+  </div>
+
+  <div class="card" id="panel-config" style="display:none;">
+    <h3>Configure Ticket Panel</h3>
+    <label for="channel-select">Select Channel for Panel:</label>
+    <select id="channel-select">
+      <option value="">Select a channel</option>
+    </select>
+
+    <label for="panel-message">Panel Message:</label>
+    <textarea id="panel-message" rows="4" placeholder="Enter the message for the ticket panel..."></textarea>
+
+    <label for="embed-color">Embed Color (Hex):</label>
+    <input type="text" id="embed-color" placeholder="#FF0000" value="#5865F2">
+
+    <button onclick="savePanelConfig()">Save and Send Panel</button>
   </div>
 
   <script>
@@ -45,15 +65,55 @@
         document.getElementById('status').innerText = '✅ Setup data loaded';
         document.getElementById('bot-info').style.display = 'block';
         document.getElementById('guild-info').style.display = 'block';
+        document.getElementById('panel-config').style.display = 'block';
 
         document.getElementById('bot-tag').innerText = data.bot.tag;
         document.getElementById('bot-id').innerText = data.bot.id;
         document.getElementById('guild-name').innerText = data.guild.name;
         document.getElementById('guild-id').innerText = data.guild.id;
 
+        const channelSelect = document.getElementById('channel-select');
+        data.channels.forEach(channel => {
+          const option = document.createElement('option');
+          option.value = channel.id;
+          option.text = channel.name;
+          channelSelect.appendChild(option);
+        });
+
       } catch (e) {
         console.error('Failed to load setup info:', e);
         document.getElementById('status').innerHTML = '<span class="error">❌ Failed to load setup info.</span>';
+      }
+    }
+
+    async function savePanelConfig() {
+      const token = new URLSearchParams(window.location.search).get('token');
+      const channelId = document.getElementById('channel-select').value;
+      const panelMessage = document.getElementById('panel-message').value;
+      const embedColor = document.getElementById('embed-color').value;
+
+      if (!channelId) {
+        document.getElementById('status').innerHTML = '<span class="error">❌ Please select a channel.</span>';
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/save-panel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, channelId, panelMessage, embedColor })
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || 'Failed to save panel config.'}</span>`;
+          return;
+        }
+
+        document.getElementById('status').innerText = '✅ Panel sent successfully!';
+      } catch (e) {
+        console.error('Failed to save panel config:', e);
+        document.getElementById('status').innerHTML = '<span class="error">❌ Failed to save panel config.</span>';
       }
     }
 
