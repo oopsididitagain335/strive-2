@@ -1,4 +1,4 @@
-// commands/welcome/setwelcome.js
+// commands/utility/setwelcome.js
 import {
   SlashCommandBuilder,
   PermissionsBitField,
@@ -27,7 +27,7 @@ export default {
     ),
 
   async execute(interaction, args) {
-    // ✅ Defer immediately to avoid 3-second timeout
+    // Defer immediately to avoid 3-second timeout
     if (interaction.isChatInputCommand?.()) {
       await interaction.deferReply({ ephemeral: true });
     }
@@ -114,7 +114,7 @@ export default {
       if (imageUrl) embed.setImage(imageUrl);
       else if (guild.banner) embed.setImage(guild.bannerURL({ size: 1024 }));
 
-      // ✅ Use editReply for deferred, reply otherwise
+      // Use editReply for deferred, reply otherwise
       if (interaction.editReply) {
         await interaction.editReply({ embeds: [embed] });
       } else {
