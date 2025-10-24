@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionResponseFlags } from 'discord.js';
 import crypto from 'crypto';
 
 export const data = new SlashCommandBuilder()
@@ -12,6 +12,9 @@ export async function execute(interaction) {
 
   if (sub === 'create') {
     try {
+      // Defer the reply to avoid timeout issues
+      await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+
       // Create default ticket panel embed
       const panelEmbed = new EmbedBuilder()
         .setTitle('Support Ticket Panel')
@@ -29,43 +32,62 @@ export async function execute(interaction) {
 
       // Send the ticket panel to the current channel
       await interaction.channel.send({ embeds: [panelEmbed], components: [panelButton] });
-      await interaction.reply({ content: '✅ Ticket panel sent to this channel.', ephemeral: true });
+
+      // Follow up with confirmation
+      await interaction.followUp({ content: '✅ Ticket panel sent to this channel.', flags: InteractionResponseFlags.Ephemeral });
     } catch (error) {
       console.error('Create error:', error);
-      await interaction.reply({ content: '❌ Failed to send ticket panel.', ephemeral: true });
+      try {
+        await interaction.followUp({ content: '❌ Failed to send ticket panel.', flags: InteractionResponseFlags.Ephemeral });
+      } catch (followUpError) {
+        console.error('Follow-up error:', followUpError);
+      }
     }
 
   } else if (sub === 'panel') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      return interaction.reply({ content: '❌ You lack permission.', ephemeral: true });
+      await interaction.reply({ content: '❌ You lack permission.', flags: InteractionResponseFlags.Ephemeral });
+      return;
     }
 
-    const token = `${interaction.guild.id}-${crypto.randomBytes(16).toString('hex')}`;
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min
+    try {
+      // Defer the reply to avoid timeout issues
+      await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
 
-    if (!interaction.client.strive) interaction.client.strive = {};
-    if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
-    console.log('Storing token:', token, 'for guild:', interaction.guild.id, 'at:', new Date().toISOString());
+      const token = `${interaction.guild.id}-${crypto.randomBytes(16).toString('hex')}`;
+      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min
 
-    const channels = interaction.guild.channels.cache
-      .filter(ch => ch.type === ChannelType.GuildText && ch.viewable)
-      .map(ch => ({ id: ch.id, name: ch.name }));
+      if (!interaction.client.strive) interaction.client.strive = {};
+      if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
+      console.log('Storing token:', token, 'for guild:', interaction.guild.id, 'at:', new Date().toISOString());
 
-    interaction.client.strive.ticketTokens.set(token, {
-      guildId: interaction.guild.id,
-      guildName: interaction.guild.name,
-      userId: interaction.user.id,
-      channels,
-      expiresAt,
-    });
+      const channels = interaction.guild.channels.cache
+        .filter(ch => ch.type === ChannelType.GuildText && ch.viewable)
+        .map(ch => ({ id: ch.id, name: ch.name }));
 
-    const url = `${process.env.BASE_URL}/setup.html?token=${encodeURIComponent(token)}`;
-    console.log('Generated URL:', url);
+      interaction.client.strive.ticketTokens.set(token, {
+        guildId: interaction.guild.id,
+        guildName: interaction.guild.name,
+        userId: interaction.user.id,
+        channels,
+        expiresAt,
+      });
 
-    await interaction.reply({
-      content: `🛠️ Configure your ticket panel here:\n${url}`,
-      ephemeral: true,
-    });
+      const url = `${process.env.BASE_URL}/setup.html?token=${encodeURIComponent(token)}`;
+      console.log('Generated URL:', url);
+
+      await interaction.followUp({
+        content: `🛠️ Configure your ticket panel here:\n${url}`,
+        flags: InteractionResponseFlags.Ephemeral,
+      });
+    } catch (error) {
+      console.error('Panel error:', error);
+      try {
+        await interaction.followUp({ content: '❌ Failed to generate ticket panel.', flags: InteractionResponseFlags.Ephemeral });
+      } catch (followUpError) {
+        console.error('Follow-up error:', followUpError);
+      }
+    }
   }
 }
 
