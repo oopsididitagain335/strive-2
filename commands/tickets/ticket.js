@@ -7,7 +7,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from 'discord.js';
-import Ticket from '../../models/Ticket.js'; // ✅ fixed relative path
+import Ticket from '../../models/Ticket.js'; // ✅ fixed path
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
@@ -18,7 +18,7 @@ export async function execute(interaction) {
 
   if (!guild) {
     return interaction.reply({
-      content: '❌ This command can only be used in a server.',
+      content: '❌ This command can only be used inside a server.',
       ephemeral: true,
     });
   }
@@ -33,13 +33,13 @@ export async function execute(interaction) {
         ephemeral: true,
       });
     } else {
-      // Channel was deleted, mark as closed in DB
+      // Channel was deleted → mark as closed
       existing.closed = true;
       await existing.save();
     }
   }
 
-  // Find or create ticket category
+  // Find or create a "Tickets" category
   let category = guild.channels.cache.find(
     c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('ticket')
   );
@@ -53,7 +53,7 @@ export async function execute(interaction) {
     } catch (err) {
       console.error('❌ Failed to create ticket category:', err);
       return interaction.reply({
-        content: '❌ Could not create a ticket category. Check my permissions.',
+        content: '❌ Could not create ticket category. Check my permissions.',
         ephemeral: true,
       });
     }
@@ -76,7 +76,7 @@ export async function execute(interaction) {
       ],
     });
 
-    // Save ticket to MongoDB
+    // Save ticket in MongoDB
     await Ticket.create({
       guildId: guild.id,
       userId: user.id,
@@ -88,7 +88,7 @@ export async function execute(interaction) {
     // Embed
     const embed = new EmbedBuilder()
       .setTitle('🎟️ Support Ticket')
-      .setDescription(`Hi ${user}, please describe your issue below. Our staff will assist you soon.`)
+      .setDescription(`Hi ${user}, please describe your issue below. A staff member will assist you shortly.`)
       .setColor(0x00aaff)
       .setTimestamp();
 
@@ -109,7 +109,7 @@ export async function execute(interaction) {
   } catch (err) {
     console.error('❌ Failed to create ticket channel:', err);
     return interaction.reply({
-      content: '❌ Failed to create your ticket channel. Check my permissions.',
+      content: '❌ Failed to create your ticket. Check my permissions.',
       ephemeral: true,
     });
   }
