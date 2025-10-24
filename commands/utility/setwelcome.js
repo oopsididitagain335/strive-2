@@ -7,7 +7,7 @@ const {
   Message,
   ChannelType,
 } = require("discord.js");
-const WelcomeChannel = require("../../models/WelcomeChannel");
+const WelcomeChannel = require("../../models/Welcome");
 
 module.exports = {
   name: "setwelcome",
