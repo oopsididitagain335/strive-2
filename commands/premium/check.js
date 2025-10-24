@@ -39,7 +39,6 @@ export async function execute(interaction) {
       });
     }
   } else if (sub === 'status') {
-    // Placeholder logic for viewing current plan
     // Replace with actual logic to fetch and display the user's plan
     await interaction.reply({
       content: '📊 You are on the Free plan. (Implement plan retrieval logic here)',
