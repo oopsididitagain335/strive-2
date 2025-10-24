@@ -1,179 +1,155 @@
-// /bot/index.js
-import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, Collection, GatewayIntentBits, Partials, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import mongoose from 'mongoose';
-import 'dotenv/config';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import fs from 'node:fs/promises';
 import express from 'express';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import helmet from 'helmet';
-import fetch from 'node-fetch';
-import { logger } from '../utils/logger.js';
-import { encryptGuildId, decryptGuildId } from '../utils/crypto.js';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import fs from 'fs/promises';
+import 'dotenv/config';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 
-// === ENV CHECK ===
-const requiredEnv = ['DISCORD_TOKEN', 'MONGO_URI', 'CLIENT_ID', 'CLIENT_SECRET', 'SESSION_KEY', 'REDIRECT_URI'];
-for (const key of requiredEnv) {
-  if (!process.env[key]) {
-    logger.fatal(`❌ Missing required environment variable: ${key}`);
+// ---------- ENV CHECK ----------
+const required = ['DISCORD_TOKEN','MONGO_URI','SESSION_KEY','DASHBOARD_URL'];
+for(const key of required){
+  if(!process.env[key]){
+    console.error(`❌ Missing env var: ${key}`);
     process.exit(1);
   }
 }
 
-// === DISCORD CLIENT ===
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-  partials: [Partials.Channel],
-});
+// ---------- CRYPTO UTIL ----------
+function encryptJSON(obj, secret){
+  const json = JSON.stringify(obj);
+  const iv = crypto.randomBytes(16);
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let enc = cipher.update(json,'utf8','base64');
+  enc += cipher.final('base64');
+  return iv.toString('base64') + ':' + enc;
+}
+function decryptJSON(token, secret){
+  const [ivBase64,dataBase64] = token.split(':');
+  const iv = Buffer.from(ivBase64,'base64');
+  const encrypted = Buffer.from(dataBase64,'base64');
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const decipher = crypto.createDecipheriv('aes-256-cbc',key,iv);
+  let dec = decipher.update(encrypted,'base64','utf8');
+  dec += decipher.final('utf8');
+  return JSON.parse(dec);
+}
+
+// ---------- DISCORD CLIENT ----------
+const client = new Client({ intents:[GatewayIntentBits.Guilds], partials:[Partials.Channel] });
 client.commands = new Collection();
 
-// === DATABASE ===
+// ---------- MONGODB ----------
 await mongoose.connect(process.env.MONGO_URI);
-logger.info('✅ Connected to MongoDB');
+console.log('✅ Connected to MongoDB');
 
-// === LOAD COMMANDS ===
-async function loadCommands(dir) {
-  const commands = [];
-  const files = await fs.readdir(dir, { withFileTypes: true });
-  for (const file of files) {
-    const path = join(dir, file.name);
-    if (file.isDirectory()) commands.push(...(await loadCommands(path)));
-    else if (file.name.endsWith('.js')) {
+// ---------- LOAD COMMANDS ----------
+async function loadCommands(dir){
+  const files = await fs.readdir(dir,{withFileTypes:true});
+  const cmds = [];
+  for(const file of files){
+    const path = join(dir,file.name);
+    if(file.isDirectory()) cmds.push(...await loadCommands(path));
+    else if(file.name.endsWith('.js')){
       const cmd = await import(`file://${path}`);
-      if (cmd.data && typeof cmd.execute === 'function') commands.push(cmd);
+      if(cmd.data && cmd.execute) cmds.push(cmd);
     }
   }
-  return commands;
+  return cmds;
 }
-const commands = await loadCommands(join(PROJECT_ROOT, 'commands'));
-for (const c of commands) client.commands.set(c.data.name, c);
-logger.info(`✅ Loaded ${commands.length} commands`);
+const commands = await loadCommands(join(PROJECT_ROOT,'commands'));
+for(const c of commands) client.commands.set(c.data.name,c);
+console.log(`✅ Loaded ${commands.length} commands`);
 
-// === DISCORD EVENTS ===
-client.once('ready', () => {
-  logger.info(`🤖 Logged in as ${client.user.tag}`);
+// ---------- TICKET COMMAND INTEGRATED ----------
+client.commands.set('ticket',{
+  data: new SlashCommandBuilder()
+    .setName('ticket')
+    .setDescription('Setup/manage ticket system')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(sub=>sub.setName('setup').setDescription('Generate setup link'))
+    .addSubcommand(sub=>sub.setName('status').setDescription('Check ticket status')),
+  execute: async (interaction)=>{
+    const sub = interaction.options.getSubcommand();
+    const guild = interaction.guild;
+    const user = interaction.user;
+    if(sub==='setup'){
+      const payload = {guildId:guild.id,guildName:guild.name,createdBy:user.id,ts:Date.now()};
+      const token = encryptJSON(payload,process.env.SESSION_KEY);
+      const link = `${process.env.DASHBOARD_URL}/setup.html?token=${encodeURIComponent(token)}`;
+      await interaction.reply({
+        embeds:[{
+          title:'🎫 Ticket Setup',
+          description:`Configure panel for **${guild.name}**`,
+          fields:[
+            {name:'Server',value:`${guild.name} (${guild.id})`,inline:true},
+            {name:'Requested by',value:user.tag,inline:true}
+          ],
+          color:0x5865f2
+        }],
+        components:[{
+          type:1,
+          components:[{type:2,style:5,label:'Open Setup Panel',url:link}]
+        }],
+        ephemeral:true
+      });
+    } else if(sub==='status'){
+      await interaction.reply({content:`✅ Ticket system active in **${guild.name}**.`,ephemeral:true});
+    }
+  }
 });
 
-// === EXPRESS DASHBOARD ===
+// ---------- EVENTS ----------
+client.once('clientReady',()=>console.log(`🤖 Logged in as ${client.user.tag}`));
+client.on('interactionCreate', async (i)=>{
+  if(!i.isChatInputCommand()) return;
+  const cmd = client.commands.get(i.commandName);
+  if(cmd) try{ await cmd.execute(i); }catch(e){ console.error(e); }
+});
+
+// ---------- EXPRESS DASHBOARD ----------
 const app = express();
 const PORT = process.env.PORT || 10000;
-
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public')));
+app.use(helmet({contentSecurityPolicy:false}));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({extended:true}));
+app.use(express.static(join(PROJECT_ROOT,'dashboard','public')));
 app.use(session({
-  secret: process.env.SESSION_KEY,
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
-  cookie: { secure: false },
+  secret:process.env.SESSION_KEY,
+  resave:false,
+  saveUninitialized:false,
+  store:MongoStore.create({mongoUrl:process.env.MONGO_URI})
 }));
 
-function ensureAuth(req, res, next) {
-  if (!req.session.discordUser) {
-    return res.redirect(`/login?redirect=${encodeURIComponent(req.originalUrl)}`);
-  }
-  next();
-}
+// AUTH MIDDLEWARE
+function ensureAuth(req,res,next){ if(!req.session.discordUser) return res.redirect('/login'); next(); }
 
-// === OAUTH LOGIN ===
-app.get('/login', (req, res) => {
-  const redirect = req.query.redirect || '/dashboard';
-  const url = new URL('https://discord.com/api/oauth2/authorize');
-  url.searchParams.set('client_id', process.env.CLIENT_ID);
-  url.searchParams.set('redirect_uri', process.env.REDIRECT_URI);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'identify guilds');
-  url.searchParams.set('state', redirect);
-  res.redirect(url.toString());
-});
-
-app.get('/auth/callback', async (req, res) => {
-  const { code, state } = req.query;
-  if (!code) return res.status(400).send('Missing code.');
-
-  try {
-    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: process.env.REDIRECT_URI,
-      }),
-    });
-
-    const token = await tokenRes.json();
-    if (!token.access_token) throw new Error('Token exchange failed');
-
-    const [userRes, guildRes] = await Promise.all([
-      fetch('https://discord.com/api/users/@me', { headers: { Authorization: `Bearer ${token.access_token}` } }),
-      fetch('https://discord.com/api/users/@me/guilds', { headers: { Authorization: `Bearer ${token.access_token}` } }),
-    ]);
-
-    req.session.discordUser = await userRes.json();
-    req.session.userGuilds = await guildRes.json();
-
-    res.redirect(state || '/dashboard');
-  } catch (err) {
-    logger.error('OAuth Error:', err);
-    res.status(500).send('Login failed.');
+// ---------- API: VERIFY SETUP TOKEN ----------
+app.get('/api/setup',ensureAuth,(req,res)=>{
+  const { token } = req.query;
+  if(!token) return res.json({error:'No token provided'});
+  try{
+    const payload = decryptJSON(token,process.env.SESSION_KEY);
+    res.json({guildId:payload.guildId,guildName:payload.guildName,createdBy:payload.createdBy});
+  }catch(e){
+    res.json({error:'Invalid or expired token'});
   }
 });
 
-app.get('/auth/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/'));
-});
+// ---------- DASHBOARD ROUTES ----------
+app.get('/',(req,res)=>res.sendFile(join(PROJECT_ROOT,'dashboard','public','index.html')));
+app.get('/setup.html',ensureAuth,(req,res)=>res.sendFile(join(PROJECT_ROOT,'dashboard','public','setup.html')));
 
-// === API ROUTES ===
-app.get('/api/user', ensureAuth, (req, res) => {
-  const { id, username, avatar } = req.session.discordUser;
-  res.json({
-    id,
-    username,
-    avatar: avatar ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png` : null,
-  });
-});
-
-app.get('/api/servers', ensureAuth, (req, res) => {
-  const servers = (req.session.userGuilds || []).filter(g => (BigInt(g.permissions) & BigInt(8)) !== 0n);
-  res.json({ servers });
-});
-
-app.get('/api/setup/verify', ensureAuth, async (req, res) => {
-  const token = req.query.token;
-  const guildId = decryptGuildId(token, process.env.SESSION_KEY);
-  if (!guildId) return res.status(400).json({ error: 'Invalid token' });
-
-  const guild = client.guilds.cache.get(guildId);
-  if (!guild) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
-
-  res.json({
-    guild: { id: guild.id, name: guild.name, icon: guild.iconURL() },
-    user: req.session.discordUser,
-  });
-});
-
-app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
-app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
-app.get('/setup.html', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html')));
-
-// === START ===
-app.listen(PORT, '0.0.0.0', () => logger.info(`🌐 Dashboard running at http://0.0.0.0:${PORT}`));
-
-try {
-  await client.login(process.env.DISCORD_TOKEN);
-  logger.info(`✅ Bot connected as ${client.user.tag}`);
-} catch (err) {
-  logger.fatal('❌ Discord login failed: ' + err.message);
-  process.exit(1);
-}
+// ---------- START SERVER + BOT ----------
+app.listen(PORT,'0.0.0.0',()=>console.log(`🌐 Dashboard running at http://0.0.0.0:${PORT}`));
+try{ await client.login(process.env.DISCORD_TOKEN); }
+catch(err){ console.error('❌ Discord login failed',err.message); process.exit(1); }
