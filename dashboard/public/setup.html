@@ -36,7 +36,7 @@
     </select>
 
     <label for="panel-message">Panel Message:</label>
-    <textarea id="panel-message" rows="4" placeholder="Enter the message for the ticket panel..."></textarea>
+    <textarea id="panel-message" rows="4" placeholder="Enter the message for the ticket panel...">Click the button below to create a support ticket.</textarea>
 
     <label for="embed-color">Embed Color (Hex):</label>
     <input type="text" id="embed-color" placeholder="#FF0000" value="#5865F2">
@@ -79,7 +79,6 @@
           option.text = channel.name;
           channelSelect.appendChild(option);
         });
-
       } catch (e) {
         console.error('Failed to load setup info:', e);
         document.getElementById('status').innerHTML = '<span class="error">❌ Failed to load setup info.</span>';
