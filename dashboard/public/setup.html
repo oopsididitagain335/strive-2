@@ -1,124 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Ticket Panel Setup</title>
+  <meta charset="UTF-8">
+  <title>Bot Setup</title>
   <style>
-    body { font-family: sans-serif; background: #1e1e1e; color: white; text-align: center; padding: 40px; }
-    form { max-width: 500px; margin: auto; text-align: left; }
-    input, textarea, select, button { padding: 8px; margin: 8px 0; width: 100%; border-radius: 4px; border: 1px solid #444; background: #2b2b2b; color: white; }
-    button { background: #5865F2; cursor: pointer; width: auto; display: block; margin: 10px auto; }
-    .button-row { display: flex; gap: 8px; align-items: center; }
-    .button-row input { flex: 1; }
-    #buttons { margin-top: 10px; }
-    #preview { background: #2b2b2b; padding: 20px; border-radius: 6px; margin-top: 20px; }
+    body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 30px; }
+    .card { background: #1c1c1c; padding: 20px; border-radius: 10px; display: inline-block; margin-top: 20px; }
+    img { border-radius: 50%; }
+    .guild { margin: 10px 0; padding: 10px; background: #222; border-radius: 8px; }
   </style>
 </head>
 <body>
-  <h2>🎫 Ticket Panel Builder</h2>
-  <form id="panelForm">
-    <input type="hidden" id="token">
-    
-    <label>Panel Title</label>
-    <input type="text" id="title" value="Support Tickets">
-    
-    <label>Description</label>
-    <textarea id="description">Click a button below to open a ticket.</textarea>
-    
-    <label>Embed Color</label>
-    <input type="color" id="color" value="#00ff00">
-
-    <label>Channel to Post In</label>
-    <select id="channelSelect"></select>
-
-    <h3>Buttons</h3>
-    <div id="buttons"></div>
-    <button type="button" id="addButton">➕ Add Button</button>
-
-    <button type="submit">🚀 Deploy Panel</button>
-  </form>
-
-  <div id="preview">
-    <h3>Preview</h3>
-    <div id="previewEmbed">
-      <strong id="pTitle">Support Tickets</strong>
-      <p id="pDesc">Click a button below to open a ticket.</p>
-    </div>
+  <h1>🤖 Bot Setup</h1>
+  <div id="status">Loading bot status...</div>
+  <div class="card" id="bot-info" style="display:none;">
+    <h2 id="bot-tag"></h2>
+    <p>ID: <span id="bot-id"></span></p>
   </div>
+  <div id="guilds"></div>
 
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    document.getElementById('token').value = token;
-
-    async function loadTokenData() {
-      const res = await fetch(`/api/ticket/token?token=${token}`);
+    async function loadStatus() {
+      const res = await fetch('/api/bot-status');
       const data = await res.json();
-      if (!data.valid) return alert('Invalid or expired token.');
 
-      const select = document.getElementById('channelSelect');
-      data.channels.forEach(ch => {
-        const opt = document.createElement('option');
-        opt.value = ch.id;
-        opt.textContent = `#${ch.name}`;
-        select.appendChild(opt);
-      });
+      if (!data.connected) {
+        document.getElementById('status').innerText = '❌ Bot not connected.';
+        return;
+      }
+
+      document.getElementById('status').innerText = '✅ Bot Connected';
+      document.getElementById('bot-info').style.display = 'block';
+      document.getElementById('bot-tag').innerText = data.bot.tag;
+      document.getElementById('bot-id').innerText = data.bot.id;
+
+      const guildsDiv = document.getElementById('guilds');
+      guildsDiv.innerHTML = '<h3>Connected Servers:</h3>' + data.guilds.map(
+        g => `<div class="guild">${g.name} (${g.id})</div>`
+      ).join('');
     }
 
-    function addButton(label = 'General Support', style = 'primary') {
-      const div = document.createElement('div');
-      div.className = 'button-row';
-      div.innerHTML = `
-        <input type="text" placeholder="Label" value="${label}">
-        <select>
-          <option value="primary" ${style === 'primary' ? 'selected' : ''}>Primary</option>
-          <option value="secondary" ${style === 'secondary' ? 'selected' : ''}>Secondary</option>
-          <option value="success" ${style === 'success' ? 'selected' : ''}>Success</option>
-          <option value="danger" ${style === 'danger' ? 'selected' : ''}>Danger</option>
-        </select>
-        <button type="button" onclick="this.parentElement.remove()">🗑️</button>
-      `;
-      document.getElementById('buttons').appendChild(div);
-    }
-
-    document.getElementById('addButton').addEventListener('click', () => addButton());
-
-    document.getElementById('panelForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const title = document.getElementById('title').value;
-      const description = document.getElementById('description').value;
-      const color = document.getElementById('color').value;
-      const channelId = document.getElementById('channelSelect').value;
-
-      const buttons = Array.from(document.querySelectorAll('#buttons .button-row')).map(div => ({
-        label: div.querySelector('input').value,
-        style: div.querySelector('select').value,
-      }));
-
-      const payload = { token, title, description, color, channelId, buttons };
-
-      const res = await fetch('/api/ticket/deploy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      alert(data.success ? '✅ Panel deployed!' : '❌ Failed to deploy.');
-    });
-
-    // Live preview
-    ['title', 'description', 'color'].forEach(id => {
-      document.getElementById(id).addEventListener('input', () => {
-        document.getElementById('pTitle').textContent = document.getElementById('title').value;
-        document.getElementById('pDesc').textContent = document.getElementById('description').value;
-        document.getElementById('previewEmbed').style.borderLeft = `4px solid ${document.getElementById('color').value}`;
-      });
-    });
-
-    loadTokenData();
-    addButton();
+    loadStatus();
   </script>
 </body>
 </html>
