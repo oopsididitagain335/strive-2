@@ -7,48 +7,57 @@
     body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 30px; }
     .card { background: #1c1c1c; padding: 20px; border-radius: 10px; display: inline-block; margin-top: 20px; }
     .guild { margin: 10px 0; padding: 10px; background: #222; border-radius: 8px; }
+    .error { color: #ff4c4c; }
   </style>
 </head>
 <body>
   <h1>🤖 Bot Setup</h1>
-  <div id="status">Loading bot status...</div>
+  <div id="status">Loading setup info...</div>
+
   <div class="card" id="bot-info" style="display:none;">
     <h2 id="bot-tag"></h2>
     <p>ID: <span id="bot-id"></span></p>
   </div>
-  <div id="guilds"></div>
+
+  <div class="card" id="guild-info" style="display:none;">
+    <h3 id="guild-name"></h3>
+    <p>Guild ID: <span id="guild-id"></span></p>
+  </div>
 
   <script>
-    async function loadStatus() {
+    async function loadSetup() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      if (!token) {
+        document.getElementById('status').innerText = '❌ Missing setup token.';
+        return;
+      }
+
       try {
-        const res = await fetch('/api/bot-status');
+        const res = await fetch(`/api/setup-info?token=${encodeURIComponent(token)}`);
         const data = await res.json();
 
-        if (!data.connected) {
-          document.getElementById('status').innerText = '❌ Bot not connected.';
+        if (!res.ok || data.error) {
+          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || 'Failed to load setup info.'}</span>`;
           return;
         }
 
-        document.getElementById('status').innerText = '✅ Bot Connected';
+        document.getElementById('status').innerText = '✅ Setup data loaded';
         document.getElementById('bot-info').style.display = 'block';
+        document.getElementById('guild-info').style.display = 'block';
+
         document.getElementById('bot-tag').innerText = data.bot.tag;
         document.getElementById('bot-id').innerText = data.bot.id;
+        document.getElementById('guild-name').innerText = data.guild.name;
+        document.getElementById('guild-id').innerText = data.guild.id;
 
-        const guildsDiv = document.getElementById('guilds');
-        if (data.guilds.length === 0) {
-          guildsDiv.innerHTML = '<p>No servers found.</p>';
-        } else {
-          guildsDiv.innerHTML = '<h3>Connected Servers:</h3>' + data.guilds.map(
-            g => `<div class="guild">${g.name} (${g.id})</div>`
-          ).join('');
-        }
       } catch (e) {
-        console.error('Failed to load bot status', e);
-        document.getElementById('status').innerText = '❌ Failed to load bot status';
+        console.error('Failed to load setup info:', e);
+        document.getElementById('status').innerHTML = '<span class="error">❌ Failed to load setup info.</span>';
       }
     }
 
-    loadStatus();
+    loadSetup();
   </script>
 </body>
 </html>
