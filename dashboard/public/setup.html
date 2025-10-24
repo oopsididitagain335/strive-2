@@ -6,7 +6,6 @@
   <style>
     body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 30px; }
     .card { background: #1c1c1c; padding: 20px; border-radius: 10px; display: inline-block; margin-top: 20px; }
-    img { border-radius: 50%; }
     .guild { margin: 10px 0; padding: 10px; background: #222; border-radius: 8px; }
   </style>
 </head>
@@ -21,23 +20,32 @@
 
   <script>
     async function loadStatus() {
-      const res = await fetch('/api/bot-status');
-      const data = await res.json();
+      try {
+        const res = await fetch('/api/bot-status');
+        const data = await res.json();
 
-      if (!data.connected) {
-        document.getElementById('status').innerText = '❌ Bot not connected.';
-        return;
+        if (!data.connected) {
+          document.getElementById('status').innerText = '❌ Bot not connected.';
+          return;
+        }
+
+        document.getElementById('status').innerText = '✅ Bot Connected';
+        document.getElementById('bot-info').style.display = 'block';
+        document.getElementById('bot-tag').innerText = data.bot.tag;
+        document.getElementById('bot-id').innerText = data.bot.id;
+
+        const guildsDiv = document.getElementById('guilds');
+        if (data.guilds.length === 0) {
+          guildsDiv.innerHTML = '<p>No servers found.</p>';
+        } else {
+          guildsDiv.innerHTML = '<h3>Connected Servers:</h3>' + data.guilds.map(
+            g => `<div class="guild">${g.name} (${g.id})</div>`
+          ).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load bot status', e);
+        document.getElementById('status').innerText = '❌ Failed to load bot status';
       }
-
-      document.getElementById('status').innerText = '✅ Bot Connected';
-      document.getElementById('bot-info').style.display = 'block';
-      document.getElementById('bot-tag').innerText = data.bot.tag;
-      document.getElementById('bot-id').innerText = data.bot.id;
-
-      const guildsDiv = document.getElementById('guilds');
-      guildsDiv.innerHTML = '<h3>Connected Servers:</h3>' + data.guilds.map(
-        g => `<div class="guild">${g.name} (${g.id})</div>`
-      ).join('');
     }
 
     loadStatus();
