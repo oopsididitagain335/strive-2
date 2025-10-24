@@ -17,7 +17,7 @@ export const data = new SlashCommandBuilder()
     sc
       .setName('panel')
       .setDescription('Generate a ticket panel (admin only)')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels) // Corrected
   );
 
 export async function execute(interaction) {
