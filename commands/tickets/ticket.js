@@ -1,11 +1,10 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import crypto from 'crypto';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
   .setDescription('Create or manage support tickets')
   .addSubcommand(sc => sc.setName('create').setDescription('Open a new ticket'))
-  .addSubcommand(sc => sc.setName('close').setDescription('Close the current ticket'))
   .addSubcommand(sc => sc.setName('panel').setDescription('Generate a ticket panel (admin only)'));
 
 export async function execute(interaction) {
@@ -13,41 +12,84 @@ export async function execute(interaction) {
 
   if (sub === 'create') {
     try {
+      // Find or create the "Strive Tickets" category
+      let category = interaction.guild.channels.cache.find(
+        ch => ch.type === ChannelType.GuildCategory && ch.name === 'Strive Tickets'
+      );
+
+      if (!category) {
+        category = await interaction.guild.channels.create({
+          name: 'Strive Tickets',
+          type: ChannelType.GuildCategory,
+          permissionOverwrites: [
+            {
+              id: interaction.guild.id,
+              deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+              id: interaction.client.user.id,
+              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels],
+            },
+          ],
+        });
+      }
+
+      // Create the ticket thread
       const thread = await interaction.channel.threads.create({
         name: `ticket-${interaction.user.username}-${crypto.randomBytes(4).toString('hex')}`,
         autoArchiveDuration: 1440,
         type: ChannelType.PrivateThread,
       });
+
+      // Move thread to Strive Tickets category
+      await thread.setParent(category.id);
       await thread.members.add(interaction.user.id);
+
+      // Create ticket embed
+      const ticketEmbed = new EmbedBuilder()
+        .setTitle('Support Ticket')
+        .setDescription('Welcome to your support ticket. A staff member will assist you shortly.')
+        .setColor('#5865F2')
+        .setTimestamp();
+
+      // Create ticket buttons
+      const ticketButtons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`claim_ticket_${thread.id}`)
+          .setLabel('Claim')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`close_ticket_${thread.id}`)
+          .setLabel('Close')
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`reminder_ticket_${thread.id}`)
+          .setLabel('Reminder')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      // Send ticket embed with buttons to the thread
+      await thread.send({ embeds: [ticketEmbed], components: [ticketButtons] });
+
+      // Send default ticket panel to the current channel
+      const panelEmbed = new EmbedBuilder()
+        .setTitle('Support Ticket Panel')
+        .setDescription('Click the button below to create a support ticket.')
+        .setColor('#5865F2')
+        .setTimestamp();
+
+      const panelButton = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`create_ticket_${interaction.guild.id}`)
+          .setLabel('Create Ticket')
+          .setStyle(ButtonStyle.Primary)
+      );
+
+      await interaction.channel.send({ embeds: [panelEmbed], components: [panelButton] });
       await interaction.reply({ content: `✅ Ticket created: ${thread}`, ephemeral: true });
     } catch (error) {
       console.error('Create error:', error);
       await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
-    }
-
-  } else if (sub === 'close') {
-    if (!interaction.channel.isThread()) {
-      return interaction.reply({ content: '❌ Use this inside a ticket thread.', ephemeral: true });
-    }
-
-    const thread = interaction.channel;
-    const isCreator = thread.ownerId === interaction.user.id;
-    const hasPermission = interaction.member.permissionsIn(thread).has(PermissionFlagsBits.ManageThreads);
-
-    if (!isCreator && !hasPermission) {
-      return interaction.reply({ content: '❌ You don\'t have permission to close this ticket.', ephemeral: true });
-    }
-
-    if (thread.archived) {
-      return interaction.reply({ content: '❌ This ticket is already closed.', ephemeral: true });
-    }
-
-    try {
-      await thread.setArchived(true);
-      await interaction.reply('🔒 Ticket closed.');
-    } catch (error) {
-      console.error('Close error:', error);
-      await interaction.reply({ content: '❌ Failed to close ticket.', ephemeral: true });
     }
 
   } else if (sub === 'panel') {
