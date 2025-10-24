@@ -1,4 +1,4 @@
-// /bot/index.js
+// bot/index.js
 import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
 import mongoose from 'mongoose';
 import 'dotenv/config';
@@ -67,9 +67,11 @@ const loadCommandsRecursively = async (dir) => {
       commands.push(...(await loadCommandsRecursively(path)));
     } else if (dirent.isFile() && dirent.name.endsWith('.js')) {
       try {
-        const command = await import(`file://${path}`);
-        if (command.data && typeof command.execute === 'function') {
+        const { default: command } = await import(`file://${path}`);
+        if (command?.data && typeof command.execute === 'function') {
           commands.push(command);
+        } else {
+          console.warn(`⚠️ Skipping invalid command file: ${path}`);
         }
       } catch (err) {
         console.error(`Failed to load command ${path}:`, err);
@@ -80,13 +82,15 @@ const loadCommandsRecursively = async (dir) => {
 };
 
 const allCommands = await loadCommandsRecursively(join(PROJECT_ROOT, 'commands'));
-for (const cmd of allCommands) client.commands.set(cmd.data.name, cmd);
+for (const cmd of allCommands) {
+  client.commands.set(cmd.data.name, cmd);
+}
 logger.info(`✅ Loaded ${allCommands.length} commands`);
 
 client.once('ready', async () => {
   logger.info(`🤖 Logged in as ${client.user.tag} (${client.user.id})`);
   try {
-    const commandData = allCommands.map(cmd => cmd.data.toJSON());
+    const commandData = allCommands.map((cmd) => cmd.data.toJSON());
     await client.application.commands.set(commandData);
     logger.info(`📡 Registered ${commandData.length} global commands`);
   } catch (err) {
@@ -101,13 +105,25 @@ try {
   for (const file of eventFiles) {
     if (file.isFile() && file.name.endsWith('.js')) {
       const filePath = join(eventsPath, file.name);
-      const event = await import(`file://${filePath}`);
-      if (event.once) client.once(event.name, (...args) => event.execute(...args, client));
-      else client.on(event.name, (...args) => event.execute(...args, client));
+      try {
+        const { default: event } = await import(`file://${filePath}`);
+        if (event?.name && typeof event.execute === 'function') {
+          if (event.once) {
+            client.once(event.name, (...args) => event.execute(...args, client));
+          } else {
+            client.on(event.name, (...args) => event.execute(...args, client));
+          }
+        } else {
+          console.warn(`⚠️ Skipping invalid event file: ${filePath}`);
+        }
+      } catch (err) {
+        console.error(`Failed to load event ${filePath}:`, err);
+      }
     }
   }
+  logger.info(`✅ Loaded events from ${eventsPath}`);
 } catch (err) {
-  logger.warn('No events directory found or failed to load events:', err);
+  logger.warn('⚠️ No events directory found or failed to load events:', err);
 }
 
 // === EXPRESS DASHBOARD ===
@@ -117,23 +133,29 @@ app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public')));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.use(session({
-  secret: process.env.SESSION_KEY,
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collection: 'sessions' }),
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 14 * 24 * 60 * 60 * 1000,
-  },
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_KEY,
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, collectionName: 'sessions' }),
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 14 * 24 * 60 * 60 * 1000,
+    },
+  })
+);
 
 // === BASIC ROUTES ===
 app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
-app.get('/dashboard', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
-app.get('/setup.html', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html')));
+app.get('/dashboard', (req, res) =>
+  res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html'))
+);
+app.get('/setup.html', (req, res) =>
+  res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html'))
+);
 
 // === SETUP INFO API ===
 app.get('/api/setup-info', async (req, res) => {
@@ -141,7 +163,6 @@ app.get('/api/setup-info', async (req, res) => {
   if (!token) return res.status(400).json({ error: 'Missing token' });
 
   try {
-    // decryptJSON() should return something like: { guildId: '123456789012345678', timestamp: ... }
     const data = decryptJSON(token, process.env.ENCRYPTION_SECRET);
     if (!data.guildId) return res.status(400).json({ error: 'Invalid token payload' });
 
