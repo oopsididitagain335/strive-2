@@ -49,16 +49,21 @@
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token');
       if (!token) {
-        document.getElementById('status').innerText = '❌ Missing setup token.';
+        document.getElementById('status').innerHTML = '<span class="error">❌ Missing setup token.</span>';
         return;
       }
+      console.log('Loading setup with token:', token);
 
       try {
-        const res = await fetch(`/api/setup-info?token=${encodeURIComponent(token)}`);
+        const res = await fetch(`${window.location.origin}/api/setup-info?token=${encodeURIComponent(token)}`, {
+          mode: 'cors',
+          credentials: 'include'
+        });
         const data = await res.json();
+        console.log('API response:', res.status, data);
 
-        if (!res.ok || data.error) {
-          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || 'Failed to load setup info.'}</span>`;
+        if (!res.ok) {
+          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || `HTTP ${res.status} error`}</span>`;
           return;
         }
 
@@ -80,8 +85,8 @@
           channelSelect.appendChild(option);
         });
       } catch (e) {
-        console.error('Failed to load setup info:', e);
-        document.getElementById('status').innerHTML = '<span class="error">❌ Failed to load setup info.</span>';
+        console.error('Fetch error:', e);
+        document.getElementById('status').innerHTML = '<span class="error">❌ Network error or server unavailable.</span>';
       }
     }
 
@@ -97,22 +102,25 @@
       }
 
       try {
-        const res = await fetch('/api/save-panel', {
+        const res = await fetch(`${window.location.origin}/api/save-panel`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, channelId, panelMessage, embedColor })
+          body: JSON.stringify({ token, channelId, panelMessage, embedColor }),
+          mode: 'cors',
+          credentials: 'include'
         });
         const data = await res.json();
+        console.log('Save response:', res.status, data);
 
-        if (!res.ok || data.error) {
-          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || 'Failed to save panel config.'}</span>`;
+        if (!res.ok) {
+          document.getElementById('status').innerHTML = `<span class="error">❌ ${data.error || `HTTP ${res.status} error`}</span>`;
           return;
         }
 
         document.getElementById('status').innerText = '✅ Panel sent successfully!';
       } catch (e) {
-        console.error('Failed to save panel config:', e);
-        document.getElementById('status').innerHTML = '<span class="error">❌ Failed to save panel config.</span>';
+        console.error('Save error:', e);
+        document.getElementById('status').innerHTML = '<span class="error">❌ Network error or server unavailable.</span>';
       }
     }
 
