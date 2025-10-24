@@ -60,7 +60,7 @@ export async function execute(interaction) {
 
     if (!interaction.client.strive) interaction.client.strive = {};
     if (!interaction.client.strive.ticketTokens) interaction.client.strive.ticketTokens = new Map();
-    console.log('Storing token:', token, 'for guild:', interaction.guild.id);
+    console.log('Storing token:', token, 'for guild:', interaction.guild.id, 'at:', new Date().toISOString());
 
     const channels = interaction.guild.channels.cache
       .filter(ch => ch.type === ChannelType.GuildText && ch.viewable)
@@ -75,6 +75,7 @@ export async function execute(interaction) {
     });
 
     const url = `${process.env.BASE_URL}/setup.html?token=${encodeURIComponent(token)}`;
+    console.log('Generated URL:', url);
 
     await interaction.reply({
       content: `🛠️ Configure your ticket panel here:\n${url}`,
@@ -86,30 +87,30 @@ export async function execute(interaction) {
 export async function handleSetupInfo(req, res) {
   const { token } = req.query;
   if (!token) {
-    console.log('Missing token');
+    console.log('Missing token at:', new Date().toISOString());
     return res.status(400).json({ error: 'Missing token' });
   }
 
   const client = req.client;
   if (!client.strive?.ticketTokens?.has(token)) {
-    console.log('Invalid token:', token);
+    console.log('Invalid token:', token, 'at:', new Date().toISOString());
     return res.status(404).json({ error: 'Invalid token' });
   }
 
   const tokenData = client.strive.ticketTokens.get(token);
   if (tokenData.expiresAt < Date.now()) {
-    console.log('Expired token:', token);
+    console.log('Expired token:', token, 'at:', new Date().toISOString());
     client.strive.ticketTokens.delete(token);
     return res.status(410).json({ error: 'Token expired' });
   }
 
   const [guildIdFromToken] = token.split('-');
   if (guildIdFromToken !== tokenData.guildId) {
-    console.log('Guild mismatch for token:', token, 'Expected:', tokenData.guildId, 'Got:', guildIdFromToken);
+    console.log('Guild mismatch for token:', token, 'Expected:', tokenData.guildId, 'Got:', guildIdFromToken, 'at:', new Date().toISOString());
     return res.status(403).json({ error: 'Token guild mismatch' });
   }
 
-  console.log('Valid token:', token, 'for guild:', tokenData.guildId);
+  console.log('Valid token:', token, 'for guild:', tokenData.guildId, 'at:', new Date().toISOString());
   res.json({
     bot: { tag: client.user.tag, id: client.user.id },
     guild: { id: tokenData.guildId, name: tokenData.guildName },
@@ -120,32 +121,32 @@ export async function handleSetupInfo(req, res) {
 export async function handleSavePanel(req, res) {
   const { token, channelId, panelMessage, embedColor } = req.body;
   if (!token || !channelId) {
-    console.log('Missing token or channel ID');
+    console.log('Missing token or channel ID at:', new Date().toISOString());
     return res.status(400).json({ error: 'Missing token or channel ID' });
   }
 
   const client = req.client;
   if (!client.strive?.ticketTokens?.has(token)) {
-    console.log('Invalid token in save:', token);
+    console.log('Invalid token in save:', token, 'at:', new Date().toISOString());
     return res.status(404).json({ error: 'Invalid or expired token' });
   }
 
   const tokenData = client.strive.ticketTokens.get(token);
   if (tokenData.expiresAt < Date.now()) {
-    console.log('Expired token in save:', token);
+    console.log('Expired token in save:', token, 'at:', new Date().toISOString());
     client.strive.ticketTokens.delete(token);
     return res.status(410).json({ error: 'Token expired' });
   }
 
   if (tokenData.guildId !== token.split('-')[0]) {
-    console.log('Guild mismatch in save:', token);
+    console.log('Guild mismatch in save:', token, 'at:', new Date().toISOString());
     return res.status(403).json({ error: 'Token does not match guild' });
   }
 
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || channel.guildId !== tokenData.guildId) {
-      console.log('Invalid channel:', channelId);
+      console.log('Invalid channel:', channelId, 'at:', new Date().toISOString());
       return res.status(400).json({ error: 'Invalid channel' });
     }
 
@@ -173,10 +174,10 @@ export async function handleSavePanel(req, res) {
     });
 
     client.strive.ticketTokens.delete(token);
-    console.log('Panel sent successfully for token:', token);
+    console.log('Panel sent successfully for token:', token, 'at:', new Date().toISOString());
     res.json({ success: true });
   } catch (error) {
-    console.error('Save panel error:', error);
+    console.error('Save panel error:', error, 'at:', new Date().toISOString());
     res.status(500).json({ error: 'Failed to send panel' });
   }
 }
