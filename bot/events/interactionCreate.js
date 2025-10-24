@@ -60,10 +60,19 @@ export async function execute(interaction, client) {
           ],
         });
 
+        // Store ticket data
+        if (!client.strive) client.strive = {};
+        if (!client.strive.tickets) client.strive.tickets = new Map();
+        client.strive.tickets.set(ticketChannel.id, {
+          openerId: interaction.user.id,
+          guildId: interaction.guild.id,
+          createdAt: Date.now(),
+        });
+
         // Create ticket embed
         const ticketEmbed = new EmbedBuilder()
           .setTitle('Support Ticket')
-          .setDescription('Welcome to your support ticket. A staff member will assist you shortly.')
+          .setDescription(`Welcome to your support ticket, <@${interaction.user.id}>. A staff member will assist you shortly.`)
           .setColor('#5865F2')
           .setTimestamp();
 
@@ -83,7 +92,8 @@ export async function execute(interaction, client) {
             .setStyle(ButtonStyle.Secondary)
         );
 
-        // Send ticket embed with buttons
+        // Send ping and ticket embed with buttons
+        await ticketChannel.send(`<@${interaction.user.id}>`);
         await ticketChannel.send({ embeds: [ticketEmbed], components: [ticketButtons] });
 
         await interaction.followUp({
@@ -133,6 +143,11 @@ export async function execute(interaction, client) {
             ephemeral: true,
           });
           return;
+        }
+
+        // Clean up ticket data
+        if (client.strive?.tickets?.has(channel.id)) {
+          client.strive.tickets.delete(channel.id);
         }
 
         await channel.delete();
@@ -224,11 +239,9 @@ export async function execute(interaction, client) {
           return;
         }
 
-        // Assume the ticket opener is the user with view permissions (excluding the bot)
-        const opener = channel.permissionOverwrites.cache.find(
-          po => po.type === 'member' && po.id !== client.user.id
-        );
-        if (!opener) {
+        // Get opener from stored ticket data
+        const ticketData = client.strive?.tickets?.get(channel.id);
+        if (!ticketData?.openerId) {
           await interaction.followUp({
             content: '❌ Could not identify ticket opener.',
             ephemeral: true,
@@ -236,7 +249,7 @@ export async function execute(interaction, client) {
           return;
         }
 
-        const user = await client.users.fetch(opener.id);
+        const user = await client.users.fetch(ticketData.openerId);
         await user.send({
           content: `Hello! Please check your support ticket in ${interaction.guild.name}: ${channel}`,
         });
@@ -250,7 +263,7 @@ export async function execute(interaction, client) {
           userId: interaction.user.id,
           guildId: interaction.guild.id,
           channelId: channel.id,
-          openerId: opener.id,
+          openerId: ticketData.openerId,
         });
       } catch (error) {
         console.error('Ticket reminder error:', error);
