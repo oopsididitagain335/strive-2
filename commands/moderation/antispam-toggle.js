@@ -1,5 +1,5 @@
 // /commands/moderation/antispam-toggle.js
-import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, InteractionResponseFlags } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import ProtectionConfig from '../../models/ProtectionConfig.js';
 import { logger } from '../../utils/logger.js';
 
@@ -15,7 +15,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction) {
   // Defer reply to avoid "Unknown Interaction" error
-  await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+  await interaction.deferReply({ ephemeral: true });
 
   try {
     const enabled = interaction.options.getBoolean('enabled');
@@ -44,7 +44,7 @@ export async function execute(interaction) {
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error('Error in /antispam command', {
-      guildId: interaction.guild.id,
+      guildId: interaction.guild?.id,
       userId: interaction.user.id,
       error: error.message,
       stack: error.stack,
