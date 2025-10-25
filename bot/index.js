@@ -1,3 +1,4 @@
+// src/index.js
 import { Client, Collection, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType } from 'discord.js';
 import mongoose from 'mongoose';
 import 'dotenv/config';
@@ -9,7 +10,7 @@ import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import helmet from 'helmet';
 import fetch from 'node-fetch';
-import { logger } from '../utils/logger.js';
+import { logger } from './logging.js'; // ✅ Load from same directory
 import { encryptJSON, decryptJSON } from '../utils/crypto.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,7 +60,7 @@ try {
   process.exit(1);
 }
 
-// === OPTIONAL REDIS (if present) ===
+// === OPTIONAL REDIS ===
 if (process.env.REDIS_URL) {
   try {
     const Redis = (await import('ioredis')).default;
@@ -103,18 +104,17 @@ const loadCommandsRecursively = async (dir) => {
   return commands;
 };
 
-// load commands folder (adjust path if different)
 const allCommands = await loadCommandsRecursively(join(PROJECT_ROOT, 'commands'));
 for (const cmd of allCommands) client.commands.set(cmd.data.name, cmd);
 logger.info(`✅ Loaded ${allCommands.length} commands`);
 
-// === REGISTER GLOBAL COMMANDS ON READY (optional) ===
+// === REGISTER GLOBAL COMMANDS ON READY ===
 client.once('ready', async () => {
   logger.info(`🤖 Logged in as ${client.user.tag} (${client.user.id})`);
   try {
     const commandData = allCommands.map(cmd => cmd.data.toJSON());
     await client.application.commands.set(commandData);
-    logger.info(`📡 Registered ${commandData.length} global commands (may take up to ~1hr to propagate).`);
+    logger.info(`📡 Registered ${commandData.length} global commands (propagation may take up to 1 hour).`);
   } catch (err) {
     logger.warn('⚠️ Failed to register global commands:', err?.message ?? err);
   }
@@ -122,21 +122,19 @@ client.once('ready', async () => {
 
 // === LOAD EVENTS ===
 try {
-  const eventsPath = join(__dirname, 'events'); // Use __dirname directly since events is in same dir
+  const eventsPath = join(__dirname, 'events');
   logger.debug(`Attempting to load events from: ${eventsPath}`);
   try {
-    await fs.access(eventsPath); // Check if directory exists
+    await fs.access(eventsPath);
     const eventFiles = await fs.readdir(eventsPath, { withFileTypes: true });
-    logger.debug(`Found ${eventFiles.length} items in events directory`);
-    
     for (const file of eventFiles) {
       if (file.isFile() && file.name.endsWith('.js')) {
         const filePath = join(eventsPath, file.name);
         try {
           const event = await import(`file://${filePath}`);
-          const eventModule = event.default || event; // Handle ES module default export
+          const eventModule = event.default || event;
           if (!eventModule.name || typeof eventModule.execute !== 'function') {
-            logger.warn(`Skipped invalid event file: ${file.name} (missing name or execute function)`);
+            logger.warn(`Skipped invalid event file: ${file.name}`);
             continue;
           }
           if (eventModule.once) {
@@ -150,7 +148,8 @@ try {
         }
       }
     }
-    logger.info(`✅ Loaded ${client.listenerCount('ready') + client.listenerCount('messageCreate') + client.listenerCount('interactionCreate')} event listeners`);
+    const totalListeners = client.listenerCount('ready') + client.listenerCount('messageCreate') + client.listenerCount('interactionCreate');
+    logger.info(`✅ Loaded ${totalListeners} event listeners`);
   } catch (err) {
     logger.warn('⚠️ Events directory not found or inaccessible:', err.message);
   }
@@ -158,7 +157,7 @@ try {
   logger.error('Unexpected error loading events:', err.message);
 }
 
-// === Express dashboard + API server ===
+// === EXPRESS SERVER ===
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.static(join(PROJECT_ROOT, 'dashboard', 'public')));
@@ -186,11 +185,11 @@ function ensureAuth(req, res, next) {
   next();
 }
 
-// === OAuth routes ===
+// === OAUTH ROUTES ===
 app.get('/login', (req, res) => {
   const redirect = req.query.redirect || '/dashboard';
   const state = encodeURIComponent(redirect);
-  const url = new URL('https://discord.com/api/oauth2/authorize');
+  const url = new URL('https://discord.com/api/oauth2/authorize'); // ✅ Fixed trailing space
   url.searchParams.set('client_id', process.env.CLIENT_ID);
   url.searchParams.set('redirect_uri', process.env.REDIRECT_URI);
   url.searchParams.set('response_type', 'code');
@@ -204,7 +203,7 @@ app.get('/auth/callback', async (req, res) => {
   if (!code) return res.status(400).send('❌ Missing code.');
 
   try {
-    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', { // ✅ Fixed
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -219,10 +218,10 @@ app.get('/auth/callback', async (req, res) => {
     const tokens = await tokenRes.json();
     if (!tokenRes.ok) throw new Error(JSON.stringify(tokens));
 
-    const userRes = await fetch('https://discord.com/api/users/@me', {
+    const userRes = await fetch('https://discord.com/api/users/@me', { // ✅ Fixed
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
+    const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', { // ✅ Fixed
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
 
@@ -253,12 +252,11 @@ app.get('/auth/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
 
-// === API: basic user / servers ===
+// === API ENDPOINTS ===
 app.get('/api/user', ensureAuth, (req, res) => {
   const { id, username, avatar } = req.session.discordUser;
-  res.json({
-    user: { id, username, avatar: avatar ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png` : null },
-  });
+  const avatarUrl = avatar ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png` : null;
+  res.json({ user: { id, username, avatar: avatarUrl } });
 });
 
 app.get('/api/servers', ensureAuth, (req, res) => {
@@ -272,16 +270,18 @@ app.get('/api/servers', ensureAuth, (req, res) => {
   res.json({ servers: manageable });
 });
 
-// === API: bot status ===
 app.get('/api/bot-status', (req, res) => {
   res.json({
     connected: !!client.user,
-    bot: client.user ? { id: client.user.id, tag: client.user.tag, avatar: client.user.displayAvatarURL() } : null,
+    bot: client.user ? {
+      id: client.user.id,
+      tag: client.user.tag,
+      avatar: client.user.displayAvatarURL()
+    } : null,
     guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })),
   });
 });
 
-// === API: token verification (decrypt & return snapshot) ===
 app.get('/api/ticket/token', (req, res) => {
   try {
     const token = req.query.token;
@@ -294,18 +294,20 @@ app.get('/api/ticket/token', (req, res) => {
       return res.status(400).json({ valid: false, message: 'Token expired' });
     }
 
-    // Confirm the bot is in that guild
     const guild = client.guilds.cache.get(payload.guildId);
     if (!guild) return res.status(400).json({ valid: false, message: 'Bot not a member of guild' });
 
-    // Safe response: don't expose secret fields, only safe snapshot
     return res.json({
       valid: true,
       guildId: payload.guildId,
       guildName: payload.guildName || guild.name,
       userId: payload.userId,
-      channels: payload.channels || [], // snapshot captured when token created
-      bot: client.user ? { id: client.user.id, tag: client.user.tag, avatar: client.user.displayAvatarURL() } : null,
+      channels: payload.channels || [],
+      bot: client.user ? {
+        id: client.user.id,
+        tag: client.user.tag,
+        avatar: client.user.displayAvatarURL()
+      } : null,
     });
   } catch (err) {
     logger.warn('Token verify error:', err?.message ?? err);
@@ -313,7 +315,6 @@ app.get('/api/ticket/token', (req, res) => {
   }
 });
 
-// === API: deploy panel (decrypt & post to channel) ===
 app.post('/api/ticket/deploy', async (req, res) => {
   try {
     const { token, title, description, color, channelId, buttons } = req.body;
@@ -325,7 +326,6 @@ app.post('/api/ticket/deploy', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Token expired' });
     }
 
-    // Optional: require the user to be logged in and match the token's creator
     if (REQUIRE_DASHBOARD_LOGIN) {
       if (!req.session?.discordUser) {
         return res.status(401).json({ success: false, message: 'Login required to deploy' });
@@ -335,24 +335,20 @@ app.post('/api/ticket/deploy', async (req, res) => {
       }
     }
 
-    // Fetch guild & channel
     const guild = await client.guilds.fetch(payload.guildId).catch(() => null);
     if (!guild) return res.status(400).json({ success: false, message: 'Bot not in target guild' });
 
     const channel = await guild.channels.fetch(channelId).catch(() => null);
-    if (!channel) return res.status(400).json({ success: false, message: 'Channel not found' });
-    if (channel.type !== ChannelType.GuildText) {
-      return res.status(400).json({ success: false, message: 'Channel is not a text channel' });
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      return res.status(400).json({ success: false, message: 'Channel not found or not a text channel' });
     }
 
-    // Build embed
     const embed = new EmbedBuilder()
       .setTitle(title || 'Support')
       .setDescription(description || '')
       .setColor(color || '#2f3136')
       .setTimestamp();
 
-    // Build buttons (max 5)
     const row = new ActionRowBuilder();
     const safeButtons = Array.isArray(buttons) ? buttons.slice(0, 5) : [];
     for (let i = 0; i < safeButtons.length; i++) {
@@ -361,19 +357,18 @@ app.post('/api/ticket/deploy', async (req, res) => {
       const styleKey = String(b.style || 'PRIMARY').toUpperCase();
       let style = ButtonStyle.Primary;
       if (styleKey === 'SECONDARY') style = ButtonStyle.Secondary;
-      if (styleKey === 'SUCCESS') style = ButtonStyle.Success;
-      if (styleKey === 'DANGER') style = ButtonStyle.Danger;
+      else if (styleKey === 'SUCCESS') style = ButtonStyle.Success;
+      else if (styleKey === 'DANGER') style = ButtonStyle.Danger;
+
       const tokenShort = (token || '').slice(0, 16).replace(/[:/+=]/g, '');
       const customId = `ticket:${tokenShort}:${i}`;
-      const button = new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style);
-      row.addComponents(button);
+      row.addComponents(new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style));
     }
 
-    // Send message to channel
     const components = row.components.length ? [row] : [];
     await channel.send({ embeds: [embed], components });
 
-    logger.info(`✅ Deployed ticket panel to ${guild.id}/${channel.id} by token owner ${payload.userId}`);
+    logger.info(`✅ Deployed ticket panel to ${guild.id}/${channel.id} by user ${payload.userId}`);
     return res.json({ success: true });
   } catch (err) {
     logger.error('Deploy error:', err?.message ?? err, { stack: err?.stack });
@@ -381,24 +376,23 @@ app.post('/api/ticket/deploy', async (req, res) => {
   }
 });
 
-// === Serve setup HTML directly (dashboard/public should include setup.html) ===
-app.get('/setup.html', ensureAuth, (req, res) => {
-  res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'setup.html'));
-});
+// === STATIC PAGES ===
+const servePage = (page) => (req, res) => {
+  res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', page));
+};
 
-// === other dashboard routes (optional) ===
-app.get('/', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'index.html')));
-app.get('/dashboard', ensureAuth, (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'dashboard.html')));
-app.get('/verify', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'verify.html')));
-app.get('/success', (req, res) => res.sendFile(join(PROJECT_ROOT, 'dashboard', 'public', 'success.html')));
+app.get('/', servePage('index.html'));
+app.get('/dashboard', ensureAuth, servePage('dashboard.html'));
+app.get('/setup.html', ensureAuth, servePage('setup.html'));
+app.get('/verify', servePage('verify.html'));
+app.get('/success', servePage('success.html'));
 app.get('/health', (req, res) => res.json({ status: 'OK', time: new Date().toISOString() }));
 
-// start http server
+// === START SERVERS ===
 app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🌐 Dashboard running at ${BASE_URL}`);
 });
 
-// start discord client
 try {
   await client.login(process.env.DISCORD_TOKEN);
   logger.info(`✅ Bot connected as ${client.user.tag} (${client.user.id}) — serving ${client.guilds.cache.size} cached guild(s)`);
@@ -407,7 +401,7 @@ try {
   process.exit(1);
 }
 
-// graceful shutdown
+// === GRACEFUL SHUTDOWN ===
 async function shutdown(signal) {
   logger.warn(`Received ${signal} — shutting down...`);
   try {
