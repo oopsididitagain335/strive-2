@@ -52,9 +52,9 @@ export function antispam(client) {
       return;
     }
 
-    // Explicitly check if anti-spam is enabled
+    // Skip if anti-spam is disabled or config is missing
     if (!config?.antiSpamEnabled) {
-      logger.debug('Anti-spam disabled, skipping', { guildId: guild.id });
+      logger.debug('Anti-spam disabled or config missing, skipping', { guildId: guild.id });
       return;
     }
 
@@ -128,7 +128,7 @@ export function antispam(client) {
 
         // Attempt ephemeral message, fall back to non-ephemeral
         try {
-          await channel.send({ content: `${author}`, embeds: [embed], flags: InteractionResponseFlags.Ephemeral });
+          await channel.send({ content: `${author}`, embeds: [embed], ephemeral: true });
         } catch (ephemeralErr) {
           logger.warn('Ephemeral message failed, sending non-ephemeral', {
             guildId: guild.id,
