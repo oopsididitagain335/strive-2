@@ -1,6 +1,6 @@
 // /models/ProtectionConfig.js
 import { Schema, model } from 'mongoose';
-import { logger } from '../utils/logger.js'; // Import logger for debugging
+import { logger } from '../utils/logger.js';
 
 const protectionConfigSchema = new Schema(
   {
@@ -24,10 +24,8 @@ const protectionConfigSchema = new Schema(
   }
 );
 
-// Ensure unique guildId
 protectionConfigSchema.index({ guildId: 1 }, { unique: true });
 
-// Log document creation/updates for debugging
 protectionConfigSchema.post('save', function (doc) {
   logger.debug('ProtectionConfig saved', {
     guildId: doc.guildId,
