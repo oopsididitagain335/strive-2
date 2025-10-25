@@ -1,5 +1,6 @@
 // /models/ProtectionConfig.js
 import { Schema, model } from 'mongoose';
+import { logger } from '../utils/logger.js'; // Import logger for debugging
 
 const protectionConfigSchema = new Schema(
   {
@@ -14,16 +15,24 @@ const protectionConfigSchema = new Schema(
     },
     antiSpamEnabled: {
       type: Boolean,
-      default: false, // Default to disabled anti-spam
+      default: false,
     },
   },
   {
-    timestamps: true, // Track creation and update times
-    collection: 'protectionConfig', // Explicit collection name
+    timestamps: true,
+    collection: 'protectionConfig',
   }
 );
 
 // Ensure unique guildId
 protectionConfigSchema.index({ guildId: 1 }, { unique: true });
+
+// Log document creation/updates for debugging
+protectionConfigSchema.post('save', function (doc) {
+  logger.debug('ProtectionConfig saved', {
+    guildId: doc.guildId,
+    antiSpamEnabled: doc.antiSpamEnabled,
+  });
+});
 
 export default model('ProtectionConfig', protectionConfigSchema);
