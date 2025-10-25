@@ -455,4 +455,184 @@ module.exports = (client) => {
       oldState.channelId &&
       newState.channelId &&
       oldState.channelId !== newState.channelId
-    
+    ) {
+      const embed = new EmbedBuilder()
+        .setTitle('🔁 Voice Channel Switched')
+        .setDescription(`${formatUser(member.user)} switched channels`)
+        .addFields(
+          { name: 'From', value: formatChannel(oldState.channel) },
+          { name: 'To', value: formatChannel(newState.channel) }
+        )
+        .setColor(LOG_CATEGORIES.VOICE.color);
+      sendLog(guild, 'voiceSwitches', embed);
+    }
+    // State change (mute, deaf, etc.)
+    if (
+      oldState.mute !== newState.mute ||
+      oldState.deaf !== newState.deaf ||
+      oldState.selfMute !== newState.selfMute ||
+      oldState.selfDeaf !== newState.selfDeaf ||
+      oldState.streaming !== newState.streaming
+    ) {
+      const embed = new EmbedBuilder()
+        .setTitle('🎚️ Voice State Changed')
+        .setDescription(
+          `${formatUser(member.user)} in ${formatChannel(newState.channel || oldState.channel)}`
+        )
+        .addFields(
+          { name: 'Server Mute', value: `${oldState.mute ? 'Yes' : 'No'} → ${newState.mute ? 'Yes' : 'No'}` },
+          { name: 'Server Deaf', value: `${oldState.deaf ? 'Yes' : 'No'} → ${newState.deaf ? 'Yes' : 'No'}` },
+          { name: 'Self Mute', value: `${oldState.selfMute ? 'Yes' : 'No'} → ${newState.selfMute ? 'Yes' : 'No'}` },
+          { name: 'Self Deaf', value: `${oldState.selfDeaf ? 'Yes' : 'No'} → ${newState.selfDeaf ? 'Yes' : 'No'}` },
+          { name: 'Streaming', value: `${oldState.streaming ? 'Yes' : 'No'} → ${newState.streaming ? 'Yes' : 'No'}` }
+        )
+        .setColor(LOG_CATEGORIES.VOICE.color);
+      sendLog(guild, 'voiceStates', embed);
+    }
+  });
+
+  // === THREADS ===
+  client.on('threadCreate', (thread) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🧵 Thread Created')
+      .setDescription(thread.name)
+      .addFields({ name: 'Channel', value: formatChannel(thread.parent) })
+      .setColor(LOG_CATEGORIES.VOICE.color);
+    sendLog(thread.guild, 'threads', embed);
+  });
+
+  client.on('threadDelete', (thread) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🧵 Thread Deleted')
+      .setDescription(thread.name)
+      .addFields({ name: 'Channel', value: formatChannel(thread.parent) })
+      .setColor(LOG_CATEGORIES.VOICE.color);
+    sendLog(thread.guild, 'threads', embed);
+  });
+
+  client.on('threadUpdate', (oldThread, newThread) => {
+    if (oldThread.name !== newThread.name || oldThread.archived !== newThread.archived) {
+      const embed = new EmbedBuilder()
+        .setTitle('🧵 Thread Updated')
+        .setDescription(`Thread: ${newThread.name}`)
+        .addFields(
+          { name: 'Name Before', value: oldThread.name || 'None' },
+          { name: 'Name After', value: newThread.name || 'None' },
+          { name: 'Archived', value: `${oldThread.archived ? 'Yes' : 'No'} → ${newThread.archived ? 'Yes' : 'No'}` }
+        )
+        .setColor(LOG_CATEGORIES.VOICE.color);
+      sendLog(newThread.guild, 'threads', embed);
+    }
+  });
+
+  // === STAGE INSTANCES ===
+  client.on('stageInstanceCreate', (stage) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🎙️ Stage Created')
+      .setDescription(stage.topic || 'No topic')
+      .addFields({ name: 'Channel', value: formatChannel(stage.channel) })
+      .setColor(LOG_CATEGORIES.VOICE.color);
+    sendLog(stage.guild, 'stageEvents', embed);
+  });
+
+  client.on('stageInstanceDelete', (stage) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🎙️ Stage Deleted')
+      .setDescription(stage.topic || 'No topic')
+      .addFields({ name: 'Channel', value: formatChannel(stage.channel) })
+      .setColor(LOG_CATEGORIES.VOICE.color);
+    sendLog(stage.guild, 'stageEvents', embed);
+  });
+
+  client.on('stageInstanceUpdate', (oldStage, newStage) => {
+    if (oldStage.topic !== newStage.topic || oldStage.privacyLevel !== newStage.privacyLevel) {
+      const embed = new EmbedBuilder()
+        .setTitle('🎙️ Stage Updated')
+        .setDescription(`Stage: ${newStage.topic || 'No topic'}`)
+        .addFields(
+          { name: 'Topic Before', value: oldStage.topic || 'None' },
+          { name: 'Topic After', value: newStage.topic || 'None' },
+          { name: 'Privacy Level', value: `${oldStage.privacyLevel} → ${newStage.privacyLevel}` }
+        )
+        .setColor(LOG_CATEGORIES.VOICE.color);
+      sendLog(newStage.guild, 'stageEvents', embed);
+    }
+  });
+
+  // === INTEGRATIONS ===
+  client.on('inviteCreate', (invite) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🔗 Invite Created')
+      .setDescription(`Invite Code: ${invite.code}`)
+      .addFields(
+        { name: 'Channel', value: formatChannel(invite.channel) },
+        { name: 'Inviter', value: formatUser(invite.inviter) },
+        { name: 'Expires', value: invite.expiresAt ? invite.expiresAt.toISOString() : 'Never' }
+      )
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(invite.guild, 'inviteCreates', embed);
+  });
+
+  client.on('inviteDelete', (invite) => {
+    const embed = new EmbedBuilder()
+      .setTitle('❌ Invite Deleted')
+      .setDescription(`Invite Code: ${invite.code}`)
+      .addFields({ name: 'Channel', value: formatChannel(invite.channel) })
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(invite.guild, 'inviteDeletes', embed);
+  });
+
+  client.on('webhookUpdate', (channel) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🔄 Webhook Updated')
+      .setDescription(`Webhook updated in ${formatChannel(channel)}`)
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(channel.guild, 'webhookUpdate', embed);
+  });
+
+  client.on('integrationCreate', (integration) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🔌 Integration Added')
+      .setDescription(`Integration: ${integration.name}`)
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(integration.guild, 'integrationCreate', embed);
+  });
+
+  client.on('integrationDelete', (integration) => {
+    const embed = new EmbedBuilder()
+      .setTitle('❌ Integration Removed')
+      .setDescription(`Integration: ${integration.name}`)
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(integration.guild, 'integrationDelete', embed);
+  });
+
+  client.on('autoModerationActionExecution', (execution) => {
+    const embed = new EmbedBuilder()
+      .setTitle('🛡️ AutoMod Triggered')
+      .setDescription(`Rule: ${execution.ruleName}`)
+      .addFields(
+        { name: 'User', value: formatUser(execution.user) },
+        { name: 'Channel', value: formatChannel(execution.channel) },
+        { name: 'Action', value: execution.action.type.toString() }
+      )
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(execution.guild, 'automod', embed);
+  });
+
+  client.on('interactionCreate', (interaction) => {
+    if (!interaction.isCommand() && !interaction.isButton()) return;
+    const embed = new EmbedBuilder()
+      .setTitle('🧩 Interaction Used')
+      .setDescription(`Type: ${interaction.isCommand() ? 'Slash Command' : 'Button'}`)
+      .addFields(
+        { name: 'User', value: formatUser(interaction.user) },
+        { name: 'Channel', value: formatChannel(interaction.channel) },
+        {
+          name: 'Command/Button',
+          value: interaction.isCommand() ? interaction.commandName : interaction.customId,
+        }
+      )
+      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
+    sendLog(interaction.guild, 'interactions', embed);
+  });
+};
