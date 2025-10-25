@@ -1,3 +1,4 @@
+// /bot/events/interactionCreate.js
 import pkg from 'discord.js';
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = pkg;
 import { logger } from '../utils/logger.js';
@@ -107,21 +108,25 @@ export async function execute(interaction, client) {
           channelId: ticketChannel.id,
         });
       } catch (error) {
-        console.error('Ticket creation error:', error);
+        logger.error('TICKET_CREATION_ERROR', {
+          userId: interaction.user.id,
+          guildId: interaction.guild?.id,
+          error: error.message,
+          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
+        });
+
         try {
           await interaction.followUp({
             content: '❌ Failed to create ticket.',
             ephemeral: true,
           });
         } catch (followUpError) {
-          console.error('Follow-up error:', followUpError);
+          logger.error('TICKET_FOLLOWUP_ERROR', {
+            userId: interaction.user.id,
+            guildId: interaction.guild?.id,
+            error: followUpError.message,
+          });
         }
-        logger.error('TICKET_CREATION_ERROR', {
-          userId: interaction.user.id,
-          guildId: interaction.guild.id,
-          error: error.message,
-          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-        });
       }
     } else if (interaction.customId.startsWith('close_ticket_')) {
       try {
@@ -157,21 +162,25 @@ export async function execute(interaction, client) {
           channelId: channel.id,
         });
       } catch (error) {
-        console.error('Ticket close error:', error);
+        logger.error('TICKET_CLOSE_ERROR', {
+          userId: interaction.user.id,
+          guildId: interaction.guild?.id,
+          error: error.message,
+          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
+        });
+
         try {
           await interaction.followUp({
             content: '❌ Failed to close ticket.',
             ephemeral: true,
           });
         } catch (followUpError) {
-          console.error('Follow-up error:', followUpError);
+          logger.error('TICKET_FOLLOWUP_ERROR', {
+            userId: interaction.user.id,
+            guildId: interaction.guild?.id,
+            error: followUpError.message,
+          });
         }
-        logger.error('TICKET_CLOSE_ERROR', {
-          userId: interaction.user.id,
-          guildId: interaction.guild.id,
-          error: error.message,
-          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-        });
       }
     } else if (interaction.customId.startsWith('claim_ticket_')) {
       try {
@@ -210,21 +219,25 @@ export async function execute(interaction, client) {
           channelId: channel.id,
         });
       } catch (error) {
-        console.error('Ticket claim error:', error);
+        logger.error('TICKET_CLAIM_ERROR', {
+          userId: interaction.user.id,
+          guildId: interaction.guild?.id,
+          error: error.message,
+          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
+        });
+
         try {
           await interaction.followUp({
             content: '❌ Failed to claim ticket.',
             ephemeral: true,
           });
         } catch (followUpError) {
-          console.error('Follow-up error:', followUpError);
+          logger.error('TICKET_FOLLOWUP_ERROR', {
+            userId: interaction.user.id,
+            guildId: interaction.guild?.id,
+            error: followUpError.message,
+          });
         }
-        logger.error('TICKET_CLAIM_ERROR', {
-          userId: interaction.user.id,
-          guildId: interaction.guild.id,
-          error: error.message,
-          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-        });
       }
     } else if (interaction.customId.startsWith('reminder_ticket_')) {
       try {
@@ -266,66 +279,101 @@ export async function execute(interaction, client) {
           openerId: ticketData.openerId,
         });
       } catch (error) {
-        console.error('Ticket reminder error:', error);
+        logger.error('TICKET_REMINDER_ERROR', {
+          userId: interaction.user.id,
+          guildId: interaction.guild?.id,
+          error: error.message,
+          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
+        });
+
         try {
           await interaction.followUp({
             content: '❌ Failed to send reminder.',
             ephemeral: true,
           });
         } catch (followUpError) {
-          console.error('Follow-up error:', followUpError);
+          logger.error('TICKET_FOLLOWUP_ERROR', {
+            userId: interaction.user.id,
+            guildId: interaction.guild?.id,
+            error: followUpError.message,
+          });
         }
-        logger.error('TICKET_REMINDER_ERROR', {
-          userId: interaction.user.id,
-          guildId: interaction.guild.id,
-          error: error.message,
-          stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-        });
       }
     }
     return;
   }
 
   // Handle slash commands
-  if (!interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand()) {
+    logger.debug('Non-command interaction ignored', {
+      type: interaction.type,
+      userId: interaction.user.id,
+      guildId: interaction.guild?.id,
+    });
+    return;
+  }
 
   // Ensure bot is ready
   if (!client.isReady()) {
-    logger.warn('BOT_NOT_READY', {
+    logger.warn('Bot not ready for command', {
       command: interaction.commandName,
       userId: interaction.user.id,
       guildId: interaction.guild?.id,
     });
+    const errorEmbed = new EmbedBuilder()
+      .setColor('#FF0000')
+      .setTitle('Bot Not Ready')
+      .setDescription('The bot is not ready to process commands. Please try again later.')
+      .setTimestamp();
+    await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     return;
   }
 
   const command = client.commands.get(interaction.commandName);
   if (!command) {
-    logger.warn('COMMAND_NOT_FOUND', {
+    logger.warn('Command not found', {
       command: interaction.commandName,
       userId: interaction.user.id,
       guildId: interaction.guild?.id,
     });
+    const errorEmbed = new EmbedBuilder()
+      .setColor('#FF0000')
+      .setTitle('Command Not Found')
+      .setDescription(`The command \`${interaction.commandName}\` does not exist.`)
+      .setTimestamp();
+    await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     return;
   }
 
-  // Check if user has permission to run the command
-  if (command.permissions && !interaction.member.permissions.has(command.permissions)) {
-    logger.info('COMMAND_PERMISSION_DENIED', {
-      command: interaction.commandName,
-      userId: interaction.user.id,
-      guildId: interaction.guild?.id,
-    });
-    await interaction.reply({
-      content: '❌ You do not have permission to use this command.',
-      ephemeral: true,
-    });
-    return;
+  // Check permissions
+  if (command.data.default_member_permissions) {
+    const requiredPermissions = BigInt(command.data.default_member_permissions);
+    if (!interaction.member.permissions.has(requiredPermissions)) {
+      logger.info('Command permission denied', {
+        command: interaction.commandName,
+        userId: interaction.user.id,
+        guildId: interaction.guild?.id,
+        permissions: requiredPermissions.toString(),
+      });
+      const errorEmbed = new EmbedBuilder()
+        .setColor('#FF0000')
+        .setTitle('Permission Denied')
+        .setDescription('You do not have permission to use this command.')
+        .setTimestamp();
+      await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      return;
+    }
   }
 
   try {
+    logger.debug('Executing command', {
+      command: interaction.commandName,
+      userId: interaction.user.id,
+      guildId: interaction.guild?.id,
+      channelId: interaction.channel?.id,
+    });
     await command.execute(interaction, client);
-    logger.info('COMMAND_EXECUTED', {
+    logger.info('Command executed successfully', {
       command: interaction.commandName,
       userId: interaction.user.id,
       guildId: interaction.guild?.id,
@@ -336,16 +384,22 @@ export async function execute(interaction, client) {
       command: interaction.commandName,
       userId: interaction.user.id,
       guildId: interaction.guild?.id,
+      channelId: interaction.channel?.id,
       error: error.message,
       stack: error.stack?.split('\n').slice(0, 3).join('\n'),
     });
 
-    const errorMessage = '❌ An error occurred while running this command.';
+    const errorEmbed = new EmbedBuilder()
+      .setColor('#FF0000')
+      .setTitle('Command Error')
+      .setDescription('An error occurred while executing the command.')
+      .setTimestamp();
+
     try {
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: errorMessage, ephemeral: true });
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
       } else {
-        await interaction.reply({ content: errorMessage, ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
       }
     } catch (followUpError) {
       logger.error('COMMAND_FOLLOWUP_ERROR', {
@@ -354,7 +408,6 @@ export async function execute(interaction, client) {
         guildId: interaction.guild?.id,
         error: followUpError.message,
       });
-      // Fallback to logging if interaction response fails (e.g., timed out)
     }
   }
 }
