@@ -5,8 +5,10 @@ const {
   ChannelType,
   PermissionFlagsBits,
 } = require('discord.js');
+
 const OLD_CATEGORY_NAME = '📁・LOGS';
-const DONATION_LINK = 'https://coff.ee/solacedev';
+const DONATION_LINK = 'https://coff.ee/solacedev'; // ✅ Removed trailing space
+
 // === NEW CATEGORY STRUCTURE ===
 const LOG_CATEGORIES = {
   MOD: { name: '📁・MOD LOGS', color: 0xff4500 },
@@ -16,6 +18,7 @@ const LOG_CATEGORIES = {
   VOICE: { name: '📁・VOICE & STAGE', color: 0x800080 },
   INTEGRATIONS: { name: '📁・INTEGRATIONS', color: 0x6b7280 },
 };
+
 // Map log types to category
 const LOG_TYPES = {
   // MOD
@@ -75,130 +78,184 @@ const LOG_TYPES = {
   interactions: { name: 'interactions', topic: '🧩 slash/button usage', category: 'INTEGRATIONS' },
   applicationPerms: { name: 'application-perms', topic: '🛠️ app perms updated', category: 'INTEGRATIONS' },
 };
+
 module.exports = (client) => {
-  const formatUser = (user) => user ? `${user.tag} (${user.id})` : 'Unknown User';
-  const formatChannel = (ch) => ch ? `<#${ch.id}>` : 'Unknown Channel';
+  const formatUser = (user) => (user ? `${user.tag} (${user.id})` : 'Unknown User');
+  const formatChannel = (ch) => (ch ? `<#${ch.id}>` : 'Unknown Channel');
+
   // === CLEANUP OLD ===
   const cleanupOldLogs = async (guild) => {
     const oldCat = guild.channels.cache.find(
-      ch => ch.type === ChannelType.GuildCategory && ch.name === OLD_CATEGORY_NAME
+      (ch) => ch.type === ChannelType.GuildCategory && ch.name === OLD_CATEGORY_NAME
     );
     if (!oldCat) return;
     try {
       for (const channel of oldCat.children.cache.values()) {
         await channel.delete().catch(() => {});
       }
-      await oldCat.delete();
+      await oldCat.delete().catch(() => {});
     } catch (err) {
       console.error(`[Cleanup] ${guild.name}:`, err.message);
     }
   };
+
   // === SETUP ===
   const ensureLogScaffold = async (guild) => {
-    if (!guild?.available) return;
+    if (!guild?.available || guild.deleted) return;
     await cleanupOldLogs(guild);
     const categoryCache = new Map();
+
     for (const config of Object.values(LOG_TYPES)) {
       const categoryName = LOG_CATEGORIES[config.category]?.name;
+      if (!categoryName) continue;
+
       let category = categoryCache.get(categoryName);
       if (!category) {
         category = guild.channels.cache.find(
-          ch => ch.type === ChannelType.GuildCategory && ch.name === categoryName
+          (ch) => ch.type === ChannelType.GuildCategory && ch.name === categoryName
         );
         if (!category) {
-          category = await guild.channels.create({
-            name: categoryName,
-            type: ChannelType.GuildCategory,
-            permissionOverwrites: [
-              { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-              { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] },
-            ],
-          }).catch(() => null);
+          category = await guild.channels
+            .create({
+              name: categoryName,
+              type: ChannelType.GuildCategory,
+              permissionOverwrites: [
+                { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                {
+                  id: client.user.id,
+                  allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.EmbedLinks,
+                  ],
+                },
+              ],
+            })
+            .catch(() => null);
         }
         if (!category) continue;
         categoryCache.set(categoryName, category);
       }
+
       const exists = guild.channels.cache.find(
-        ch => ch.parentId === category.id && ch.name === config.name
+        (ch) => ch.parentId === category.id && ch.name === config.name
       );
       if (!exists) {
-        await guild.channels.create({
-          name: config.name,
-          type: ChannelType.GuildText,
-          topic: config.topic,
-          parent: category.id,
-          permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] },
-          ],
-        }).catch(() => {});
+        await guild.channels
+          .create({
+            name: config.name,
+            type: ChannelType.GuildText,
+            topic: config.topic,
+            parent: category.id,
+            permissionOverwrites: [
+              { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+              {
+                id: client.user.id,
+                allow: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+                  PermissionFlagsBits.EmbedLinks,
+                ],
+              },
+            ],
+          })
+          .catch(() => {});
       }
     }
   };
+
   // === GET CHANNEL ===
   const getLogChannel = (guild, typeKey) => {
     const config = LOG_TYPES[typeKey];
-    if (!config) return null;
+    if (!config || !guild) return null;
     const categoryName = LOG_CATEGORIES[config.category]?.name;
+    if (!categoryName) return null;
+
     const category = guild.channels.cache.find(
-      ch => ch.type === ChannelType.GuildCategory && ch.name === categoryName
+      (ch) => ch.type === ChannelType.GuildCategory && ch.name === categoryName
     );
     if (!category) return null;
+
     return guild.channels.cache.find(
-      ch => ch.parentId === category.id && ch.name === config.name
+      (ch) => ch.parentId === category.id && ch.name === config.name
     );
   };
+
   // === SEND ===
   const sendLog = async (guild, typeKey, embed) => {
+    if (!guild || guild.deleted) return;
     const channel = getLogChannel(guild, typeKey);
     if (!channel) return;
+
     embed.addFields({
       name: '🔐 Permanently logged',
-      value: `Nothing is hidden. [Support development](${DONATION_LINK})`
+      value: `Nothing is hidden. [Support development](${DONATION_LINK})`,
     });
     embed.setTimestamp();
-    try { await channel.send({ embeds: [embed] }); } catch {}
+
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch (err) {
+      // Silent fail — don't crash bot over logging
+    }
   };
-  // === ENFORCE ===
-  client.on('ready', async () => {
+
+  // === SETUP HOOKS ===
+  client.once('ready', async () => {
     for (const guild of client.guilds.cache.values()) {
-      await ensureLogScaffold(guild);
+      await ensureLogScaffold(guild).catch(console.error);
     }
   });
-  client.on('guildCreate', ensureLogScaffold);
+
+  client.on('guildCreate', (guild) => {
+    ensureLogScaffold(guild).catch(console.error);
+  });
+
   // === MESSAGE EVENTS ===
   client.on('messageCreate', (msg) => {
     if (!msg.guild || msg.author.bot) return;
     const embed = new EmbedBuilder()
       .setTitle('💬 Message Sent')
-      .setDescription(msg.content || '*No content*')
-      .addFields({ name: 'Author', value: formatUser(msg.author) }, { name: 'Channel', value: formatChannel(msg.channel) })
+      .setDescription(msg.content?.slice(0, 1024) || '*No content*')
+      .addFields(
+        { name: 'Author', value: formatUser(msg.author) },
+        { name: 'Channel', value: formatChannel(msg.channel) }
+      )
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(msg.guild, 'msgSent', embed);
   });
+
   client.on('messageDelete', (msg) => {
-    if (!msg.guild || msg.partial) return;
+    if (!msg.guild) return;
+    // Handle partials by fetching if needed (optional)
+    const author = msg.author || { tag: 'Unknown', id: '0' };
     const embed = new EmbedBuilder()
       .setTitle('🗑️ Message Deleted')
-      .setDescription(msg.content || '*No content*')
-      .addFields({ name: 'Author', value: formatUser(msg.author) }, { name: 'Channel', value: formatChannel(msg.channel) })
+      .setDescription(msg.content?.slice(0, 1024) || '*No content*')
+      .addFields(
+        { name: 'Author', value: formatUser(author) },
+        { name: 'Channel', value: formatChannel(msg.channel) }
+      )
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(msg.guild, 'msgDeleted', embed);
   });
+
   client.on('messageUpdate', (oldMsg, newMsg) => {
     if (!oldMsg.guild || oldMsg.author?.bot) return;
     if (oldMsg.content === newMsg.content) return;
+
     const embed = new EmbedBuilder()
       .setTitle('✏️ Message Edited')
       .addFields(
         { name: 'Author', value: formatUser(oldMsg.author) },
         { name: 'Channel', value: formatChannel(oldMsg.channel) },
-        { name: 'Before', value: oldMsg.content || '*No content*' },
-        { name: 'After', value: newMsg.content || '*No content*' }
+        { name: 'Before', value: (oldMsg.content || '*No content*').slice(0, 1024) },
+        { name: 'After', value: (newMsg.content || '*No content*').slice(0, 1024) }
       )
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(oldMsg.guild, 'msgEdited', embed);
   });
+
   client.on('messageDeleteBulk', (msgs) => {
     const guild = msgs.first()?.guild;
     if (!guild) return;
@@ -208,78 +265,90 @@ module.exports = (client) => {
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(guild, 'msgBulkDeleted', embed);
   });
+
   // === REACTIONS ===
   client.on('messageReactionAdd', (reaction, user) => {
     if (user.bot) return;
-    const guild = reaction.message.guild;
+    const guild = reaction.message?.guild;
     if (!guild) return;
     const embed = new EmbedBuilder()
       .setTitle('➕ Reaction Added')
-      .setDescription(`${reaction.emoji}`)
-      .addFields({ name: 'User', value: formatUser(user) }, { name: 'Message', value: `[Jump](${reaction.message.url})` })
+      .setDescription(`${reaction.emoji.toString()}`)
+      .addFields(
+        { name: 'User', value: formatUser(user) },
+        { name: 'Message', value: `[Jump](${reaction.message.url})` }
+      )
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(guild, 'reactionsAdd', embed);
   });
+
   client.on('messageReactionRemove', (reaction, user) => {
     if (user.bot) return;
-    const guild = reaction.message.guild;
+    const guild = reaction.message?.guild;
     if (!guild) return;
     const embed = new EmbedBuilder()
       .setTitle('➖ Reaction Removed')
-      .setDescription(`${reaction.emoji}`)
-      .addFields({ name: 'User', value: formatUser(user) }, { name: 'Message', value: `[Jump](${reaction.message.url})` })
+      .setDescription(`${reaction.emoji.toString()}`)
+      .addFields(
+        { name: 'User', value: formatUser(user) },
+        { name: 'Message', value: `[Jump](${reaction.message.url})` }
+      )
       .setColor(LOG_CATEGORIES.MESSAGE.color);
     sendLog(guild, 'reactionsRemove', embed);
   });
+
   // === MEMBER ===
-  client.on('guildMemberAdd', (m) => {
+  client.on('guildMemberAdd', (member) => {
     const embed = new EmbedBuilder()
       .setTitle('📥 Member Joined')
-      .setDescription(formatUser(m.user))
+      .setDescription(formatUser(member.user))
       .setColor(LOG_CATEGORIES.MEMBER.color);
-    sendLog(m.guild, 'joins', embed);
+    sendLog(member.guild, 'joins', embed);
   });
-  client.on('guildMemberRemove', (m) => {
+
+  client.on('guildMemberRemove', (member) => {
     const embed = new EmbedBuilder()
       .setTitle('🚪 Member Left')
-      .setDescription(formatUser(m.user))
+      .setDescription(formatUser(member.user))
       .setColor(LOG_CATEGORIES.MEMBER.color);
-    sendLog(m.guild, 'leaves', embed);
+    sendLog(member.guild, 'leaves', embed);
   });
-  client.on('guildMemberUpdate', (oldM, newM) => {
-    if (oldM.nickname !== newM.nickname) {
+
+  client.on('guildMemberUpdate', (oldMember, newMember) => {
+    if (oldMember.nickname !== newMember.nickname) {
       const embed = new EmbedBuilder()
         .setTitle('📛 Nickname Changed')
         .addFields(
-          { name: 'User', value: formatUser(newM.user) },
-          { name: 'Before', value: oldM.nickname || 'None' },
-          { name: 'After', value: newM.nickname || 'None' }
+          { name: 'User', value: formatUser(newMember.user) },
+          { name: 'Before', value: oldMember.nickname || 'None' },
+          { name: 'After', value: newMember.nickname || 'None' }
         )
         .setColor(LOG_CATEGORIES.MEMBER.color);
-      sendLog(newM.guild, 'nicknames', embed);
+      sendLog(newMember.guild, 'nicknames', embed);
     }
-    if (oldM.roles.cache.size !== newM.roles.cache.size) {
-      const addedRoles = newM.roles.cache.filter(r => !oldM.roles.cache.has(r.id));
-      const removedRoles = oldM.roles.cache.filter(r => !newM.roles.cache.has(r.id));
-      if (addedRoles.size > 0) {
-        const embed = new EmbedBuilder()
-          .setTitle('✅ Role Assigned')
-          .setDescription(`Role(s) added to ${formatUser(newM.user)}`)
-          .addFields({ name: 'Roles', value: addedRoles.map(r => r.name).join(', ') })
-          .setColor(LOG_CATEGORIES.MOD.color);
-        sendLog(newM.guild, 'roleGiven', embed);
-      }
-      if (removedRoles.size > 0) {
-        const embed = new EmbedBuilder()
-          .setTitle('❌ Role Removed')
-          .setDescription(`Role(s) removed from ${formatUser(newM.user)}`)
-          .addFields({ name: 'Roles', value: removedRoles.map(r => r.name).join(', ') })
-          .setColor(LOG_CATEGORIES.MOD.color);
-        sendLog(newM.guild, 'roleTaken', embed);
-      }
+
+    const addedRoles = newMember.roles.cache.filter((r) => !oldMember.roles.cache.has(r.id));
+    const removedRoles = oldMember.roles.cache.filter((r) => !newMember.roles.cache.has(r.id));
+
+    if (addedRoles.size > 0) {
+      const embed = new EmbedBuilder()
+        .setTitle('✅ Role Assigned')
+        .setDescription(`Role(s) added to ${formatUser(newMember.user)}`)
+        .addFields({ name: 'Roles', value: addedRoles.map((r) => r.name).join(', ') })
+        .setColor(LOG_CATEGORIES.MOD.color);
+      sendLog(newMember.guild, 'roleGiven', embed);
+    }
+    if (removedRoles.size > 0) {
+      const embed = new EmbedBuilder()
+        .setTitle('❌ Role Removed')
+        .setDescription(`Role(s) removed from ${formatUser(newMember.user)}`)
+        .addFields({ name: 'Roles', value: removedRoles.map((r) => r.name).join(', ') })
+        .setColor(LOG_CATEGORIES.MOD.color);
+      sendLog(newMember.guild, 'roleTaken', embed);
     }
   });
-  // === SERVER ===
+
+  // === SERVER EVENTS ===
   client.on('roleCreate', (role) => {
     const embed = new EmbedBuilder()
       .setTitle('✅ Role Created')
@@ -287,6 +356,7 @@ module.exports = (client) => {
       .setColor(LOG_CATEGORIES.SERVER.color);
     sendLog(role.guild, 'roleCreates', embed);
   });
+
   client.on('roleDelete', (role) => {
     const embed = new EmbedBuilder()
       .setTitle('❌ Role Deleted')
@@ -294,232 +364,95 @@ module.exports = (client) => {
       .setColor(LOG_CATEGORIES.SERVER.color);
     sendLog(role.guild, 'roleDeletes', embed);
   });
+
   client.on('roleUpdate', (oldRole, newRole) => {
-    if (oldRole.name !== newRole.name || oldRole.color !== newRole.color || oldRole.permissions.bitfield !== newRole.permissions.bitfield) {
+    if (
+      oldRole.name !== newRole.name ||
+      oldRole.color !== newRole.color ||
+      !oldRole.permissions.equals(newRole.permissions)
+    ) {
       const embed = new EmbedBuilder()
         .setTitle('🔄 Role Updated')
         .setDescription(`Role: ${newRole.name}`)
         .addFields(
           { name: 'Name Before', value: oldRole.name || 'None' },
           { name: 'Name After', value: newRole.name || 'None' },
-          { name: 'Color Before', value: `#${oldRole.color.toString(16).padStart(6, '0')}` },
-          { name: 'Color After', value: `#${newRole.color.toString(16).padStart(6, '0')}` }
+          {
+            name: 'Color Before',
+            value: oldRole.color ? `#${oldRole.color.toString(16).padStart(6, '0')}` : 'None',
+          },
+          {
+            name: 'Color After',
+            value: newRole.color ? `#${newRole.color.toString(16).padStart(6, '0')}` : 'None',
+          }
         )
         .setColor(LOG_CATEGORIES.SERVER.color);
       sendLog(newRole.guild, 'roleUpdates', embed);
     }
   });
-  client.on('channelCreate', (ch) => {
+
+  client.on('channelCreate', (channel) => {
+    if (channel.type === ChannelType.GuildCategory) return; // Skip categories
     const embed = new EmbedBuilder()
       .setTitle('✅ Channel Created')
-      .setDescription(ch.name)
+      .setDescription(channel.name)
       .setColor(LOG_CATEGORIES.SERVER.color);
-    sendLog(ch.guild, 'channelCreates', embed);
+    sendLog(channel.guild, 'channelCreates', embed);
   });
-  client.on('channelDelete', (ch) => {
+
+  client.on('channelDelete', (channel) => {
+    if (channel.type === ChannelType.GuildCategory) return;
     const embed = new EmbedBuilder()
       .setTitle('❌ Channel Deleted')
-      .setDescription(ch.name)
+      .setDescription(channel.name)
       .setColor(LOG_CATEGORIES.SERVER.color);
-    sendLog(ch.guild, 'channelDeletes', embed);
+    sendLog(channel.guild, 'channelDeletes', embed);
   });
-  client.on('channelUpdate', (oldCh, newCh) => {
-    if (oldCh.name !== newCh.name || oldCh.topic !== newCh.topic) {
+
+  client.on('channelUpdate', (oldChannel, newChannel) => {
+    if (oldChannel.type === ChannelType.GuildCategory) return;
+    if (oldChannel.name !== newChannel.name || oldChannel.topic !== newChannel.topic) {
       const embed = new EmbedBuilder()
         .setTitle('🔄 Channel Updated')
-        .setDescription(`Channel: ${newCh.name}`)
+        .setDescription(`Channel: ${newChannel.name}`)
         .addFields(
-          { name: 'Name Before', value: oldCh.name || 'None' },
-          { name: 'Name After', value: newCh.name || 'None' },
-          { name: 'Topic Before', value: oldCh.topic || 'None' },
-          { name: 'Topic After', value: newCh.topic || 'None' }
+          { name: 'Name Before', value: oldChannel.name || 'None' },
+          { name: 'Name After', value: newChannel.name || 'None' },
+          { name: 'Topic Before', value: oldChannel.topic || 'None' },
+          { name: 'Topic After', value: newChannel.topic || 'None' }
         )
         .setColor(LOG_CATEGORIES.SERVER.color);
-      sendLog(newCh.guild, 'channelUpdates', embed);
+      sendLog(newChannel.guild, 'channelUpdates', embed);
     }
   });
+
   // === VOICE ===
   client.on('voiceStateUpdate', (oldState, newState) => {
     const guild = newState.guild || oldState.guild;
     if (!guild) return;
 
-    // Voice Join
-    if (!oldState.channel && newState.channel) {
+    const member = newState.member || oldState.member;
+    if (!member) return;
+
+    // Join
+    if (!oldState.channelId && newState.channelId) {
       const embed = new EmbedBuilder()
         .setTitle('🎙️ Joined Voice')
-        .setDescription(`${formatUser(newState.member.user)} joined ${formatChannel(newState.channel)}`)
+        .setDescription(`${formatUser(member.user)} joined ${formatChannel(newState.channel)}`)
         .setColor(LOG_CATEGORIES.VOICE.color);
       sendLog(guild, 'voiceJoins', embed);
     }
-    // Voice Leave
-    else if (oldState.channel && !newState.channel) {
+    // Leave
+    else if (oldState.channelId && !newState.channelId) {
       const embed = new EmbedBuilder()
         .setTitle('⏹️ Left Voice')
-        .setDescription(`${formatUser(oldState.member.user)} left ${formatChannel(oldState.channel)}`)
+        .setDescription(`${formatUser(member.user)} left ${formatChannel(oldState.channel)}`)
         .setColor(LOG_CATEGORIES.VOICE.color);
       sendLog(guild, 'voiceLeaves', embed);
     }
-    // Voice Switch
-    else if (oldState.channel && newState.channel && oldState.channel.id !== newState.channel.id) {
-      const embed = new EmbedBuilder()
-        .setTitle('🔁 Voice Channel Switched')
-        .setDescription(`${formatUser(newState.member.user)} switched channels`)
-        .addFields(
-          { name: 'From', value: formatChannel(oldState.channel) },
-          { name: 'To', value: formatChannel(newState.channel) }
-        )
-        .setColor(LOG_CATEGORIES.VOICE.color);
-      sendLog(guild, 'voiceSwitches', embed);
-    }
-    // Voice State Changes (mute, deafen, etc.)
-    if (
-      oldState.mute !== newState.mute ||
-      oldState.deaf !== newState.deaf ||
-      oldState.selfMute !== newState.selfMute ||
-      oldState.selfDeaf !== newState.selfDeaf ||
-      oldState.streaming !== newState.streaming
-    ) {
-      const embed = new EmbedBuilder()
-        .setTitle('🎚️ Voice State Changed')
-        .setDescription(`${formatUser(newState.member.user)} in ${formatChannel(newState.channel || oldState.channel)}`)
-        .addFields(
-          { name: 'Server Mute', value: `${oldState.mute ? 'Yes' : 'No'} → ${newState.mute ? 'Yes' : 'No'}` },
-          { name: 'Server Deaf', value: `${oldState.deaf ? 'Yes' : 'No'} → ${newState.deaf ? 'Yes' : 'No'}` },
-          { name: 'Self Mute', value: `${oldState.selfMute ? 'Yes' : 'No'} → ${newState.selfMute ? 'Yes' : 'No'}` },
-          { name: 'Self Deaf', value: `${oldState.selfDeaf ? 'Yes' : 'No'} → ${newState.selfDeaf ? 'Yes' : 'No'}` },
-          { name: 'Streaming', value: `${oldState.streaming ? 'Yes' : 'No'} → ${newState.streaming ? 'Yes' : 'No'}` }
-        )
-        .setColor(LOG_CATEGORIES.VOICE.color);
-      sendLog(guild, 'voiceStates', embed);
-    }
-  });
-  // === THREADS ===
-  client.on('threadCreate', (thread) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🧵 Thread Created')
-      .setDescription(thread.name)
-      .addFields({ name: 'Channel', value: formatChannel(thread.parent) })
-      .setColor(LOG_CATEGORIES.VOICE.color);
-    sendLog(thread.guild, 'threads', embed);
-  });
-  client.on('threadDelete', (thread) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🧵 Thread Deleted')
-      .setDescription(thread.name)
-      .addFields({ name: 'Channel', value: formatChannel(thread.parent) })
-      .setColor(LOG_CATEGORIES.VOICE.color);
-    sendLog(thread.guild, 'threads', embed);
-  });
-  client.on('threadUpdate', (oldThread, newThread) => {
-    if (oldThread.name !== newThread.name || oldThread.archived !== newThread.archived) {
-      const embed = new EmbedBuilder()
-        .setTitle('🧵 Thread Updated')
-        .setDescription(`Thread: ${newThread.name}`)
-        .addFields(
-          { name: 'Name Before', value: oldThread.name || 'None' },
-          { name: 'Name After', value: newThread.name || 'None' },
-          { name: 'Archived', value: `${oldThread.archived ? 'Yes' : 'No'} → ${newThread.archived ? 'Yes' : 'No'}` }
-        )
-        .setColor(LOG_CATEGORIES.VOICE.color);
-      sendLog(newThread.guild, 'threads', embed);
-    }
-  });
-  // === STAGE EVENTS ===
-  client.on('stageInstanceCreate', (stage) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🎙️ Stage Created')
-      .setDescription(stage.topic)
-      .addFields({ name: 'Channel', value: formatChannel(stage.channel) })
-      .setColor(LOG_CATEGORIES.VOICE.color);
-    sendLog(stage.guild, 'stageEvents', embed);
-  });
-  client.on('stageInstanceDelete', (stage) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🎙️ Stage Deleted')
-      .setDescription(stage.topic)
-      .addFields({ name: 'Channel', value: formatChannel(stage.channel) })
-      .setColor(LOG_CATEGORIES.VOICE.color);
-    sendLog(stage.guild, 'stageEvents', embed);
-  });
-  client.on('stageInstanceUpdate', (oldStage, newStage) => {
-    if (oldStage.topic !== newStage.topic || oldStage.privacyLevel !== newStage.privacyLevel) {
-      const embed = new EmbedBuilder()
-        .setTitle('🎙️ Stage Updated')
-        .setDescription(`Stage: ${newStage.topic}`)
-        .addFields(
-          { name: 'Topic Before', value: oldStage.topic || 'None' },
-          { name: 'Topic After', value: newStage.topic || 'None' },
-          { name: 'Privacy Level', value: `${oldStage.privacyLevel} → ${newStage.privacyLevel}` }
-        )
-        .setColor(LOG_CATEGORIES.VOICE.color);
-      sendLog(newStage.guild, 'stageEvents', embed);
-    }
-  });
-  // === INTEGRATIONS ===
-  client.on('inviteCreate', (invite) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🔗 Invite Created')
-      .setDescription(`Invite Code: ${invite.code}`)
-      .addFields(
-        { name: 'Channel', value: formatChannel(invite.channel) },
-        { name: 'Inviter', value: formatUser(invite.inviter) },
-        { name: 'Expires', value: invite.expiresAt ? invite.expiresAt.toISOString() : 'Never' }
-      )
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(invite.guild, 'inviteCreates', embed);
-  });
-  client.on('inviteDelete', (invite) => {
-    const embed = new EmbedBuilder()
-      .setTitle('❌ Invite Deleted')
-      .setDescription(`Invite Code: ${invite.code}`)
-      .addFields({ name: 'Channel', value: formatChannel(invite.channel) })
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(invite.guild, 'inviteDeletes', embed);
-  });
-  client.on('webhookUpdate', (channel) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🔄 Webhook Updated')
-      .setDescription(`Webhook updated in ${formatChannel(channel)}`)
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(channel.guild, 'webhookUpdate', embed);
-  });
-  client.on('integrationCreate', (integration) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🔌 Integration Added')
-      .setDescription(`Integration: ${integration.name}`)
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(integration.guild, 'integrationCreate', embed);
-  });
-  client.on('integrationDelete', (integration) => {
-    const embed = new EmbedBuilder()
-      .setTitle('❌ Integration Removed')
-      .setDescription(`Integration: ${integration.name}`)
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(integration.guild, 'integrationDelete', embed);
-  });
-  client.on('autoModerationActionExecution', (execution) => {
-    const embed = new EmbedBuilder()
-      .setTitle('🛡️ AutoMod Triggered')
-      .setDescription(`Rule: ${execution.ruleName}`)
-      .addFields(
-        { name: 'User', value: formatUser(execution.user) },
-        { name: 'Channel', value: formatChannel(execution.channel) },
-        { name: 'Action', value: execution.action.type }
-      )
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(execution.guild, 'automod', embed);
-  });
-  client.on('interactionCreate', (interaction) => {
-    if (!interaction.isCommand() && !interaction.isButton()) return;
-    const embed = new EmbedBuilder()
-      .setTitle('🧩 Interaction Used')
-      .setDescription(`Type: ${interaction.isCommand() ? 'Slash Command' : 'Button'}`)
-      .addFields(
-        { name: 'User', value: formatUser(interaction.user) },
-        { name: 'Channel', value: formatChannel(interaction.channel) },
-        { name: 'Command/Button', value: interaction.isCommand() ? interaction.commandName : interaction.customId }
-      )
-      .setColor(LOG_CATEGORIES.INTEGRATIONS.color);
-    sendLog(interaction.guild, 'interactions', embed);
-  });
-};
+    // Switch
+    else if (
+      oldState.channelId &&
+      newState.channelId &&
+      oldState.channelId !== newState.channelId
+    
